@@ -1,1 +1,73 @@
-# Placeholder
+"""Доменная сущность Provider — Pydantic-модели для LLM-провайдера."""
+
+from __future__ import annotations
+
+import datetime
+from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+def _utc_now() -> datetime.datetime:
+    """Фабрика: возвращает текущее UTC-время (timezone-aware)."""
+    return datetime.datetime.now(datetime.timezone.utc)
+
+
+class ProviderBase(BaseModel):
+    """Базовая схема с общими полями и валидацией."""
+
+    name: str = Field(..., min_length=1, max_length=100)
+    api_key: str = Field(..., min_length=1)
+    base_url: str = Field(...)
+    is_active: bool = Field(default=True)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: str) -> str:
+        if isinstance(v, str):
+            v = v.strip()
+        return v
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: str) -> str:
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return v
+
+
+class ProviderCreate(ProviderBase):
+    """Схема для создания провайдера (все обязательные поля из Base)."""
+
+
+class ProviderUpdate(BaseModel):
+    """Схема для частичного обновления (PATCH). Все поля опциональны."""
+
+    name: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    api_key: Optional[str] = Field(default=None, min_length=1)
+    base_url: Optional[str] = Field(default=None)
+    is_active: Optional[bool] = Field(default=None)
+
+    @field_validator("name", mode="before")
+    @classmethod
+    def _strip_name(cls, v: Optional[str]) -> Optional[str]:
+        if isinstance(v, str):
+            v = v.strip()
+        return v
+
+    @field_validator("base_url")
+    @classmethod
+    def _validate_base_url(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and not v.startswith(("http://", "https://")):
+            raise ValueError("base_url must start with http:// or https://")
+        return v
+
+
+class Provider(ProviderBase):
+    """Полная доменная сущность с id и временными метками."""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: Optional[int] = Field(default=None)
+    created_at: datetime.datetime = Field(default_factory=_utc_now)
+    updated_at: datetime.datetime = Field(default_factory=_utc_now)
