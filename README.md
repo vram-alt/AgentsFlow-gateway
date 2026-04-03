@@ -13,7 +13,6 @@ app/
 ├── services/          # Use Cases — оркестрация бизнес-логики
 ├── infrastructure/    # БД (SQLAlchemy Async), HTTP-адаптеры (Portkey)
 ├── api/               # FastAPI роутеры, middleware, DI
-└── ui/                # Jinja2 шаблоны, Bootstrap 5 статика
 ```
 
 ## Быстрый старт

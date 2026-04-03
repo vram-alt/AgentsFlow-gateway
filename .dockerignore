@@ -1,0 +1,52 @@
+# Version control
+.git
+.gitignore
+
+# Virtual environments
+.venv
+env/
+venv/
+
+# Python cache
+__pycache__
+*.py[cod]
+*$py.class
+
+# Environment & secrets
+.env
+*.env.local
+
+# Tests & QA
+tests/
+htmlcov/
+.coverage
+.pytest_cache/
+
+# Documentation
+docs/
+*.md
+
+# Databases (local)
+*.db
+*.sqlite
+*.sqlite3
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Docker
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Misc
+.roo/
+Makefile

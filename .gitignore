@@ -33,3 +33,7 @@ htmlcov/
 .coverage
 
 .roo/
+
+# Data directory (keep structure, ignore DB files)
+data/*
+!data/.gitkeep

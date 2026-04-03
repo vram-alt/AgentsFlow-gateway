@@ -13,6 +13,7 @@ from typing import Any
 import sqlalchemy.event
 import sqlalchemy.ext.asyncio
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.pool import NullPool
 
 import app.config
 
@@ -49,13 +50,19 @@ if "://" not in _database_url:
 # Engine
 # ---------------------------------------------------------------------------
 
-engine = create_async_engine(
-    _database_url,
-    echo=False,
-    pool_pre_ping=True,
-    pool_size=5,
-    max_overflow=10,
-)
+_engine_kwargs: dict[str, Any] = {
+    "echo": False,
+}
+
+if "sqlite" in _database_url:
+    # SQLite не поддерживает пулинг — используем NullPool
+    _engine_kwargs["poolclass"] = NullPool
+else:
+    _engine_kwargs["pool_pre_ping"] = True
+    _engine_kwargs["pool_size"] = 5
+    _engine_kwargs["max_overflow"] = 10
+
+engine = create_async_engine(_database_url, **_engine_kwargs)
 
 # ---------------------------------------------------------------------------
 # WAL-режим для SQLite

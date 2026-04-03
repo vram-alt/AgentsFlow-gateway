@@ -9,6 +9,7 @@ Spec: app/api/routes/policies_spec.md
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
@@ -22,6 +23,7 @@ from app.api.schemas.policies import (
     SyncRequest,
 )
 from app.domain.dto.gateway_error import GatewayError
+from app.domain.entities.policy import Policy as PolicyEntity
 from app.services.policy_service import PolicyService
 
 router = APIRouter(prefix="/api/policies", tags=["Policies"])
@@ -63,6 +65,17 @@ def _internal_error_response(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content=error_body.model_dump())
 
 
+def _serialize(obj: Any) -> Any:
+    """Конвертирует ORM/Pydantic-объект(ы) в JSON-совместимый формат."""
+    if isinstance(obj, list):
+        return [_serialize(item) for item in obj]
+    if isinstance(obj, PolicyEntity):
+        return obj.model_dump(mode="json")
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return obj
+
+
 # ── GET /api/policies/ ───────────────────────────────────────────────
 @router.get("/")
 async def list_policies(
@@ -78,7 +91,7 @@ async def list_policies(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=200, content=result)
+    return JSONResponse(status_code=200, content=_serialize(result))
 
 
 # ── POST /api/policies/ ─────────────────────────────────────────────
@@ -101,7 +114,7 @@ async def create_policy(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=201, content=result)
+    return JSONResponse(status_code=201, content=_serialize(result))
 
 
 # ── POST /api/policies/sync — MUST be BEFORE /{policy_id} ───────────
@@ -122,7 +135,7 @@ async def sync_policies(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=200, content=result)
+    return JSONResponse(status_code=200, content=_serialize(result))
 
 
 # ── PUT /api/policies/{policy_id} ───────────────────────────────────
@@ -146,7 +159,7 @@ async def update_policy(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=200, content=result)
+    return JSONResponse(status_code=200, content=_serialize(result))
 
 
 # ── DELETE /api/policies/{policy_id} ─────────────────────────────────

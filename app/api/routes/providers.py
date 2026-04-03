@@ -21,6 +21,7 @@ from app.api.schemas.providers import (
     ProviderUpdateRequest,
 )
 from app.domain.dto.gateway_error import GatewayError
+from app.domain.entities.provider import Provider as ProviderEntity
 
 router = APIRouter(prefix="/api/providers", tags=["Providers"])
 
@@ -61,6 +62,17 @@ def _internal_error_response(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content=error_body.model_dump())
 
 
+def _serialize(obj: Any) -> Any:
+    """Конвертирует ORM/Pydantic-объект(ы) в JSON-совместимый формат."""
+    if isinstance(obj, list):
+        return [_serialize(item) for item in obj]
+    if isinstance(obj, ProviderEntity):
+        return obj.model_dump(mode="json")
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump(mode="json")
+    return obj
+
+
 # ── GET /api/providers/ ──────────────────────────────────────────────
 @router.get("/")
 async def list_providers(
@@ -76,7 +88,7 @@ async def list_providers(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=200, content=result)
+    return JSONResponse(status_code=200, content=_serialize(result))
 
 
 # ── POST /api/providers/ ─────────────────────────────────────────────
@@ -99,7 +111,7 @@ async def create_provider(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=201, content=result)
+    return JSONResponse(status_code=201, content=_serialize(result))
 
 
 # ── PUT /api/providers/{provider_id} ─────────────────────────────────
@@ -124,7 +136,7 @@ async def update_provider(
     if _is_gateway_error(result):
         return _error_response(result)
 
-    return JSONResponse(status_code=200, content=result)
+    return JSONResponse(status_code=200, content=_serialize(result))
 
 
 # ── DELETE /api/providers/{provider_id} ───────────────────────────────
