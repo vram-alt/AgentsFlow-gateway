@@ -5,9 +5,7 @@
 
 from __future__ import annotations
 
-import ipaddress
 import logging
-import socket
 import time
 import uuid
 from typing import Any
@@ -16,6 +14,7 @@ from urllib.parse import unquote, urlparse
 import httpx
 
 from app.domain.dto.gateway_error import GatewayError
+from app.domain.utils.network import _is_private_ip
 from app.infrastructure.database.repositories import ProviderRepository
 
 logger = logging.getLogger(__name__)
@@ -32,50 +31,6 @@ _ALLOWED_RESPONSE_HEADERS = frozenset(
 
 # Максимальный размер ответа: 10 МБ
 _MAX_RESPONSE_SIZE = 10_485_760
-
-
-def _is_private_ip(hostname: str) -> bool:
-    """Проверяет, является ли hostname приватным IP-адресом.
-
-    [RED-3] Also resolves hostnames via socket.getaddrinfo to prevent
-    DNS rebinding attacks where a hostname initially resolves to a public
-    IP but later resolves to a private one.
-    """
-    # Убираем квадратные скобки для IPv6
-    clean = hostname.strip("[]")
-
-    # First, check if it's a literal IP address
-    try:
-        addr = ipaddress.ip_address(clean)
-        if addr.is_loopback or addr.is_private or addr.is_link_local:
-            return True
-        if str(addr) == "169.254.169.254":
-            return True
-        return False
-    except ValueError:
-        pass
-
-    # [RED-3] It's a hostname — resolve it and check all resulting IPs
-    try:
-        addrinfos = socket.getaddrinfo(
-            clean, None, socket.AF_UNSPEC, socket.SOCK_STREAM
-        )
-        for family, _type, _proto, _canonname, sockaddr in addrinfos:
-            ip_str = sockaddr[0]
-            try:
-                addr = ipaddress.ip_address(ip_str)
-                if addr.is_loopback or addr.is_private or addr.is_link_local:
-                    return True
-                if str(addr) == "169.254.169.254":
-                    return True
-            except ValueError:
-                continue
-    except (socket.gaierror, OSError):
-        # DNS resolution failed — allow the request to proceed
-        # (it will fail at the HTTP level anyway)
-        pass
-
-    return False
 
 
 class TesterService:

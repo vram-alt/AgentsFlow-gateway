@@ -51,10 +51,5 @@ class ChatResponse(BaseModel):
     guardrail_blocked: bool
 
 
-class ErrorResponse(BaseModel):
-    """Error response for POST /api/chat/send."""
-
-    trace_id: str
-    error_code: str
-    message: str
-    details: dict[str, Any] = Field(default_factory=dict)
+# Re-export from common to maintain backward compatibility
+from app.api.schemas.common import ErrorResponse as ErrorResponse  # noqa: F401

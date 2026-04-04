@@ -16,10 +16,7 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_validator
 
-
-def _utc_now() -> datetime.datetime:
-    """Фабрика: текущее UTC-время (timezone-aware)."""
-    return datetime.datetime.now(datetime.timezone.utc)
+from app.domain.utils.time import _utc_now
 
 
 # Тип для name с автоматическим strip и ограничениями длины

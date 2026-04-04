@@ -7,10 +7,7 @@ from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-
-def _utc_now() -> datetime.datetime:
-    """Фабрика: возвращает текущее UTC-время (timezone-aware)."""
-    return datetime.datetime.now(datetime.timezone.utc)
+from app.domain.utils.time import _utc_now
 
 
 class ProviderBase(BaseModel):

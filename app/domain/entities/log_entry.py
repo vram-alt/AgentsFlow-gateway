@@ -51,9 +51,7 @@ class LogEntryCreate(BaseModel):
         return v
 
 
-def _utc_now() -> datetime.datetime:
-    """Фабрика: возвращает текущее timezone-aware UTC время при каждом вызове."""
-    return datetime.datetime.now(datetime.timezone.utc)
+from app.domain.utils.time import _utc_now
 
 
 class LogEntry(LogEntryCreate):

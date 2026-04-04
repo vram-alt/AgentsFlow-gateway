@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import logging
 import uuid
+from collections.abc import Sequence
 from typing import Any
 
 from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
+from app.infrastructure.database.models import PolicyModel
 from app.infrastructure.database.repositories import (
     PolicyRepository,
     ProviderRepository,
@@ -54,7 +56,7 @@ class PolicyService:
         name: str,
         body: dict[str, Any],
         provider_name: str = "portkey",
-    ) -> Any:
+    ) -> PolicyModel | GatewayError:
         """Create policy: cloud -> DB -> return Policy."""
         # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
@@ -89,7 +91,7 @@ class PolicyService:
         policy_id: int,
         name: str | None = None,
         body: dict[str, Any] | None = None,
-    ) -> Any:
+    ) -> PolicyModel | GatewayError | None:
         """Update policy: check -> cloud (if needed) -> DB."""
         # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
@@ -121,7 +123,7 @@ class PolicyService:
         return updated
 
     # ── 5. delete_policy ─────────────────────────────────────────────
-    async def delete_policy(self, policy_id: int) -> Any:
+    async def delete_policy(self, policy_id: int) -> bool | GatewayError:
         """Delete policy: cloud (if remote_id exists) -> soft_delete in DB."""
         # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
@@ -147,12 +149,14 @@ class PolicyService:
         return result
 
     # ── 6. list_policies ─────────────────────────────────────────────
-    async def list_policies(self, only_active: bool = True) -> list[Any]:
+    async def list_policies(self, only_active: bool = True) -> Sequence[PolicyModel]:
         """Get list of policies from DB."""
         return await self.policy_repo.list_all(only_active=only_active)
 
     # ── 7. sync_policies_from_provider ───────────────────────────────
-    async def sync_policies_from_provider(self, provider_name: str = "portkey") -> Any:
+    async def sync_policies_from_provider(
+        self, provider_name: str = "portkey"
+    ) -> dict[str, int] | GatewayError:
         """Sync policies from cloud provider to local DB."""
         # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)

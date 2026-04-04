@@ -41,10 +41,5 @@ class ProviderUpdateRequest(BaseModel):
         return v
 
 
-class ErrorResponse(BaseModel):
-    """Error response with trace_id for distributed tracing."""
-
-    trace_id: str
-    error_code: str
-    message: str
-    details: dict[str, Any] = Field(default_factory=dict)
+# Re-export from common to maintain backward compatibility
+from app.api.schemas.common import ErrorResponse as ErrorResponse  # noqa: F401

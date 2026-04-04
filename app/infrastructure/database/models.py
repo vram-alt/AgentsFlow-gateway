@@ -28,6 +28,7 @@ from sqlalchemy.orm import (
 
 
 from app.config import get_settings
+from app.domain.utils.time import _utcnow
 
 
 # ---------------------------------------------------------------------------
@@ -93,14 +94,6 @@ class EncryptedString(String):
             return self.process_result_value(value, dialect)
 
         return process
-
-
-# ---------------------------------------------------------------------------
-# Утилита: текущее UTC-время
-# ---------------------------------------------------------------------------
-def _utcnow() -> datetime.datetime:
-    """Return current UTC datetime."""
-    return datetime.datetime.now(datetime.timezone.utc)
 
 
 # ---------------------------------------------------------------------------

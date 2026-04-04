@@ -113,7 +113,6 @@ class ChatService:
             response_data: dict[str, Any] = (
                 response.model_dump() if hasattr(response, "model_dump") else {}
             )
-            is_error = isinstance(response, GatewayError)
             await self.log_service.log_chat_request(
                 trace_id=trace_id,
                 prompt_data=prompt_data,

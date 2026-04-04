@@ -1,13 +1,16 @@
 services:
-  api:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: ${IMAGE_NAME:-ai-gateway-poc:latest}
-    container_name: ai-gateway-api
+    container_name: ai-gateway-backend
     restart: unless-stopped
     ports:
       - "8000:8000"
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     volumes:
-      - ./data:/app/data
+      - backend-data:/app/data
     env_file:
       - .env
     healthcheck:
@@ -16,3 +19,31 @@ services:
       timeout: 5s
       start_period: 10s
       retries: 3
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        NEXT_PUBLIC_API_TOKEN: ${NEXT_PUBLIC_API_TOKEN:-dev-token}
+    image: ${FRONTEND_IMAGE_NAME:-ai-gateway-frontend:latest}
+    container_name: ai-gateway-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-network
+
+volumes:
+  backend-data:
+    driver: local
+
+networks:
+  app-network:
+    driver: bridge

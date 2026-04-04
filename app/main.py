@@ -25,7 +25,6 @@ from app.api.routes.stats import router as stats_router
 from app.api.routes.tester import router as tester_router
 from app.api.routes.webhook import router as webhook_router
 from app.config import get_settings
-from app.domain.dto.gateway_error import GatewayError
 
 logger = logging.getLogger(__name__)
 
@@ -122,34 +121,12 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """§5.1 + §5.2: Handle GatewayError (if raised) and catch-all.
+    """§5.2: Catch-all exception handler.
 
     [RED-6] GatewayError is a Pydantic BaseModel (not an Exception subclass),
-    so it cannot be registered via @app.exception_handler directly.
-    The isinstance check below handles the case where a GatewayError-like
-    object somehow reaches the exception pipeline. In normal flow,
-    GatewayError is handled as a return value in routers.
+    so isinstance(exc, GatewayError) can never be True here.
+    GatewayError is handled as a return value in routers, not as an exception.
     """
-    # §5.1: GatewayError DTO (Pydantic BaseModel, not Exception subclass)
-    if isinstance(exc, GatewayError):
-        gw_err: GatewayError = exc  # type: ignore[assignment]
-        logger.error(
-            "GatewayError trace_id=%s error_code=%s provider=%s: %s",
-            gw_err.trace_id,
-            gw_err.error_code,
-            gw_err.provider_name,
-            gw_err.message,
-            exc_info=True,
-        )
-        return JSONResponse(
-            status_code=gw_err.status_code,
-            content={
-                "error_code": gw_err.error_code,
-                "message": gw_err.message,
-                "trace_id": gw_err.trace_id,
-            },
-        )
-
     # §5.2: Catch-all — hides internal details from the client.
     trace_id = str(uuid.uuid4())
     logger.error(

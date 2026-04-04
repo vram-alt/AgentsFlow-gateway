@@ -17,6 +17,7 @@ from typing import Any, Optional, Sequence
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.utils.time import _utcnow
 from app.infrastructure.database.models import (
     LogEntryModel,
     PolicyModel,
@@ -24,11 +25,6 @@ from app.infrastructure.database.models import (
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _utcnow() -> datetime.datetime:
-    """Return current UTC datetime."""
-    return datetime.datetime.now(datetime.timezone.utc)
 
 
 # ===================================================================

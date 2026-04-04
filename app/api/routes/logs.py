@@ -18,6 +18,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 
 from app.api.dependencies.di import get_chat_service, get_log_service
 from app.api.middleware.auth import get_current_user
+from app.domain.dto.gateway_error import GatewayError
 from app.services.log_service import LogService
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,83 @@ def _check_replay_rate_limit(user: str, app_id: int | None = None) -> bool:
 
     _replay_rate_limit[user].append(now)
     return False
+
+
+# ── Приватные хелперы для replay (рефакторинг God Method) ────────────────
+
+
+def _extract_replay_params(
+    log_entry: Any,
+) -> tuple[Any, dict[str, Any], str] | JSONResponse:
+    """§3.5 п.5-6: Извлечь и валидировать параметры replay из записи лога.
+
+    Returns:
+        Tuple (chat_request, payload_dict, provider_name) on success,
+        or JSONResponse on validation failure.
+    """
+    from app.api.schemas.chat import ChatRequest
+
+    payload = log_entry.payload
+    if isinstance(payload, str):
+        payload = json.loads(payload)
+
+    prompt_data = payload.get("prompt", {})
+
+    chat_request = ChatRequest(
+        model=prompt_data.get("model", ""),
+        messages=prompt_data.get("messages", []),
+        temperature=prompt_data.get("temperature"),
+        max_tokens=prompt_data.get("max_tokens"),
+        guardrail_ids=prompt_data.get("guardrail_ids", []),
+    )
+
+    # [YEL-8] Extract provider_name from original payload instead of hardcoding
+    provider_name = prompt_data.get("provider_name", "portkey")
+    if isinstance(payload.get("provider_name"), str):
+        provider_name = payload["provider_name"]
+
+    return chat_request, payload, provider_name
+
+
+async def _execute_replay(
+    chat_service: Any,
+    chat_request: Any,
+    provider_name: str,
+) -> JSONResponse | dict[str, Any]:
+    """§3.5 п.8-10: Выполнить replay через ChatService и сформировать ответ."""
+    result = await chat_service.send_chat_message(
+        model=chat_request.model,
+        messages=[
+            {"role": m.role, "content": m.content} for m in chat_request.messages
+        ],
+        provider_name=provider_name,
+        temperature=chat_request.temperature,
+        max_tokens=chat_request.max_tokens,
+        guardrail_ids=chat_request.guardrail_ids,
+    )
+
+    # §3.5 п.9: Обработка GatewayError
+    if isinstance(result, GatewayError):
+        return JSONResponse(
+            status_code=result.status_code,
+            content={
+                "trace_id": result.trace_id,
+                "error_code": result.error_code,
+                "message": result.message,
+            },
+        )
+
+    # §3.5 п.10: Успешный ответ
+    return {
+        "trace_id": result.trace_id,
+        "content": result.content,
+        "model": result.model,
+        "usage": result.usage,
+        "guardrail_blocked": result.guardrail_blocked,
+    }
+
+
+# ── Эндпоинты ───────────────────────────────────────────────────────────
 
 
 @router.get("/")
@@ -165,24 +243,12 @@ async def replay_log(
                 content={"detail": "Only chat_request logs can be replayed"},
             )
 
-        # §3.5 п.5: Извлечь параметры из payload
+        # §3.5 п.5-6: Извлечь и валидировать параметры
         try:
-            payload = log_entry.payload
-            if isinstance(payload, str):
-                payload = json.loads(payload)
-
-            prompt_data = payload.get("prompt", {})
-
-            # §3.5 п.6: Валидация через Pydantic-схему
-            from app.api.schemas.chat import ChatRequest
-
-            chat_request = ChatRequest(
-                model=prompt_data.get("model", ""),
-                messages=prompt_data.get("messages", []),
-                temperature=prompt_data.get("temperature"),
-                max_tokens=prompt_data.get("max_tokens"),
-                guardrail_ids=prompt_data.get("guardrail_ids", []),
-            )
+            extraction = _extract_replay_params(log_entry)
+            if isinstance(extraction, JSONResponse):
+                return extraction
+            chat_request, payload, provider_name = extraction
         except Exception as exc:
             # [YEL-4] Log suppressed exception for debugging
             logger.warning(
@@ -200,44 +266,8 @@ async def replay_log(
             current_user,
         )
 
-        # §3.5 п.8: Call ChatService
-        # [YEL-8] Extract provider_name from original payload instead of hardcoding
-        from app.domain.dto.gateway_error import GatewayError
-
-        provider_name = prompt_data.get("provider_name", "portkey")
-        if isinstance(payload.get("provider_name"), str):
-            provider_name = payload["provider_name"]
-
-        result = await chat_service.send_chat_message(
-            model=chat_request.model,
-            messages=[
-                {"role": m.role, "content": m.content} for m in chat_request.messages
-            ],
-            provider_name=provider_name,
-            temperature=chat_request.temperature,
-            max_tokens=chat_request.max_tokens,
-            guardrail_ids=chat_request.guardrail_ids,
-        )
-
-        # §3.5 п.9: Обработка GatewayError
-        if isinstance(result, GatewayError):
-            return JSONResponse(
-                status_code=result.status_code,
-                content={
-                    "trace_id": result.trace_id,
-                    "error_code": result.error_code,
-                    "message": result.message,
-                },
-            )
-
-        # §3.5 п.10: Успешный ответ
-        return {
-            "trace_id": result.trace_id,
-            "content": result.content,
-            "model": result.model,
-            "usage": result.usage,
-            "guardrail_blocked": result.guardrail_blocked,
-        }
+        # §3.5 п.8-10: Выполнить replay и вернуть результат
+        return await _execute_replay(chat_service, chat_request, provider_name)
 
     except Exception as exc:
         logger.error("Replay error: %s", exc, exc_info=True)
