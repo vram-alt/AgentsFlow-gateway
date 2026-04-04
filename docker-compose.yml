@@ -3,21 +3,22 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: ${IMAGE_NAME:-ai-gateway-poc:latest}
+    image: ${IMAGE_NAME:-ai-gateway-backend:latest}
     container_name: ai-gateway-backend
     restart: unless-stopped
     ports:
-      - "8000:8000"
-    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      - "${BACKEND_PORT:-8000}:8000"
     volumes:
       - backend-data:/app/data
     env_file:
       - .env
+    environment:
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
       timeout: 5s
-      start_period: 10s
+      start_period: 30s
       retries: 3
     networks:
       - app-network
@@ -28,12 +29,13 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
-        NEXT_PUBLIC_API_TOKEN: ${NEXT_PUBLIC_API_TOKEN:-dev-token}
     image: ${FRONTEND_IMAGE_NAME:-ai-gateway-frontend:latest}
     container_name: ai-gateway-frontend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
     depends_on:
       backend:
         condition: service_healthy

@@ -1,29 +1,29 @@
 """
-Модульные тесты для PolicyService.
-Спецификация: app/services/policy_service_spec.md
+Unit tests for PolicyService.
+Specification: app/services/policy_service_spec.md
 
-TDD Red-фаза: все тесты должны падать с ImportError,
-пока PolicyService не реализован.
+TDD Red phase: all tests should fail with ImportError,
+until PolicyService is not implemented.
 """
 
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
-# ── Импорт тестируемого класса (должен упасть на Red-фазе) ──────────────
+# ── Import tested class (should fail during Red phase) ──────────────
 from app.services.policy_service import PolicyService
 
-# ── Импорт доменных объектов (уже реализованы в скаффолдинге) ────────────
+# ── Импорт доменных объектов (already implemented in scaffolding) ────────────
 from app.domain.dto.gateway_error import GatewayError
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def mock_policy_repo():
-    """Мок PolicyRepository с async-методами."""
+    """Mock PolicyRepository with async methods."""
     repo = AsyncMock()
     repo.create = AsyncMock()
     repo.update = AsyncMock()
@@ -36,7 +36,7 @@ def mock_policy_repo():
 
 @pytest.fixture
 def mock_provider_repo():
-    """Мок ProviderRepository с async-методами."""
+    """Mock ProviderRepository with async methods."""
     repo = AsyncMock()
     repo.get_active_by_name = AsyncMock()
     return repo
@@ -44,7 +44,7 @@ def mock_provider_repo():
 
 @pytest.fixture
 def mock_adapter():
-    """Мок GatewayProvider (адаптер облака)."""
+    """Mock GatewayProvider (cloud adapter)."""
     adapter = AsyncMock()
     adapter.create_guardrail = AsyncMock()
     adapter.update_guardrail = AsyncMock()
@@ -55,13 +55,13 @@ def mock_adapter():
 
 @pytest.fixture
 def mock_log_service():
-    """Мок LogService."""
+    """Mock LogService."""
     return AsyncMock()
 
 
 @pytest.fixture
 def fake_provider():
-    """Фейковый объект провайдера с api_key и base_url."""
+    """Fake provider object with api_key and base_url."""
     provider = MagicMock()
     provider.id = 1
     provider.name = "portkey"
@@ -72,7 +72,7 @@ def fake_provider():
 
 @pytest.fixture
 def fake_policy():
-    """Фейковый объект политики из БД."""
+    """Fake policy object from DB."""
     policy = MagicMock()
     policy.id = 42
     policy.name = "content-filter"
@@ -85,7 +85,7 @@ def fake_policy():
 
 @pytest.fixture
 def service(mock_policy_repo, mock_provider_repo, mock_adapter, mock_log_service):
-    """Экземпляр PolicyService со всеми замоканными зависимостями."""
+    """Instance of PolicyService with all mocked dependencies."""
     return PolicyService(
         policy_repo=mock_policy_repo,
         provider_repo=mock_provider_repo,
@@ -100,13 +100,13 @@ def service(mock_policy_repo, mock_provider_repo, mock_adapter, mock_log_service
 
 
 class TestCreatePolicy:
-    """Тесты для метода create_policy (спецификация §3)."""
+    """Tests for метода create_policy (specification §3)."""
 
     @pytest.mark.asyncio
     async def test_create_policy_success(
         self, service, mock_policy_repo, mock_provider_repo, mock_adapter, fake_provider
     ):
-        """Успешное создание: облако → БД → возврат Policy."""
+        """Successful creation: облако → БД → возврат Policy."""
         # Arrange
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.create_guardrail.return_value = {
@@ -134,7 +134,7 @@ class TestCreatePolicy:
     async def test_create_policy_custom_provider_name(
         self, service, mock_provider_repo, mock_adapter, mock_policy_repo, fake_provider
     ):
-        """Передача кастомного provider_name вместо дефолтного 'portkey'."""
+        """Passing a custom provider_name instead of default 'portkey'."""
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.create_guardrail.return_value = {
             "remote_id": "r-456",
@@ -192,7 +192,7 @@ class TestCreatePolicy:
         await service.create_policy(name="pol", body={"b": 2})
 
         call_kwargs = mock_policy_repo.create.call_args
-        # remote_id должен быть передан в вызов create
+        # remote_id should be passed to the create call
         assert "cloud-id-xyz" in str(call_kwargs)
 
 
@@ -202,7 +202,7 @@ class TestCreatePolicy:
 
 
 class TestUpdatePolicy:
-    """Тесты для метода update_policy (спецификация §4)."""
+    """Tests for метода update_policy (specification §4)."""
 
     @pytest.mark.asyncio
     async def test_update_policy_not_found_returns_validation_error(
@@ -220,7 +220,7 @@ class TestUpdatePolicy:
     async def test_update_policy_name_only_no_cloud_call(
         self, service, mock_policy_repo, mock_adapter, fake_policy
     ):
-        """Обновление только name (без body) → облако НЕ вызывается."""
+        """Update only name (без body) → облако НЕ is called."""
         mock_policy_repo.get_by_id.return_value = fake_policy
         mock_policy_repo.update.return_value = fake_policy
 
@@ -281,7 +281,7 @@ class TestUpdatePolicy:
     async def test_update_policy_body_without_remote_id_skips_cloud(
         self, service, mock_policy_repo, mock_adapter, fake_policy
     ):
-        """Обновление body, но remote_id отсутствует → облако НЕ вызывается."""
+        """Обновление body, но remote_id отсутствует → облако НЕ is called."""
         fake_policy.remote_id = None
         mock_policy_repo.get_by_id.return_value = fake_policy
         mock_policy_repo.update.return_value = fake_policy
@@ -296,7 +296,7 @@ class TestUpdatePolicy:
     async def test_update_policy_returns_updated_entity(
         self, service, mock_policy_repo, fake_policy
     ):
-        """Метод возвращает обновлённую доменную сущность Policy."""
+        """Method returns обновлённую доменную сущность Policy."""
         updated = MagicMock(id=42, name="updated-name")
         mock_policy_repo.get_by_id.return_value = fake_policy
         mock_policy_repo.update.return_value = updated
@@ -312,7 +312,7 @@ class TestUpdatePolicy:
 
 
 class TestDeletePolicy:
-    """Тесты для метода delete_policy (спецификация §5)."""
+    """Tests for метода delete_policy (specification §5)."""
 
     @pytest.mark.asyncio
     async def test_delete_policy_not_found_returns_error(
@@ -406,11 +406,11 @@ class TestDeletePolicy:
 
 
 class TestListPolicies:
-    """Тесты для метода list_policies (спецификация §6)."""
+    """Tests for метода list_policies (specification §6)."""
 
     @pytest.mark.asyncio
     async def test_list_policies_default_only_active(self, service, mock_policy_repo):
-        """По умолчанию only_active=True."""
+        """By default only_active=True."""
         mock_policy_repo.list_all.return_value = []
 
         await service.list_policies()
@@ -419,7 +419,7 @@ class TestListPolicies:
 
     @pytest.mark.asyncio
     async def test_list_policies_include_inactive(self, service, mock_policy_repo):
-        """Передача only_active=False возвращает все политики."""
+        """Передача only_active=False возвращает все a policy."""
         mock_policy_repo.list_all.return_value = []
 
         await service.list_policies(only_active=False)
@@ -428,7 +428,7 @@ class TestListPolicies:
 
     @pytest.mark.asyncio
     async def test_list_policies_returns_list(self, service, mock_policy_repo):
-        """Метод возвращает список доменных сущностей."""
+        """Method returns список доменных сущностей."""
         fake_items = [MagicMock(), MagicMock()]
         mock_policy_repo.list_all.return_value = fake_items
 
@@ -455,7 +455,7 @@ class TestListPolicies:
 
 
 class TestSyncPoliciesFromProvider:
-    """Тесты для метода sync_policies_from_provider (спецификация §7)."""
+    """Tests for метода sync_policies_from_provider (specification §7)."""
 
     @pytest.mark.asyncio
     async def test_sync_provider_not_found_returns_error(
@@ -570,7 +570,7 @@ class TestSyncPoliciesFromProvider:
     async def test_sync_default_provider_name_is_portkey(
         self, service, mock_provider_repo, mock_adapter, fake_provider
     ):
-        """По умолчанию provider_name='portkey'."""
+        """By default provider_name='portkey'."""
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.list_guardrails.return_value = []
 
@@ -589,16 +589,16 @@ class TestSyncPoliciesFromProvider:
         bad_policy = {"remote_id": "r-bad", "name": "bad", "config": {"fail": True}}
         mock_adapter.list_guardrails.return_value = [bad_policy, good_policy]
 
-        # Первый вызов get_by_remote_id бросает исключение, второй — нормальный
+        # First get_by_remote_id call throws exception, second — normal
         mock_policy_repo.get_by_remote_id.side_effect = [
             Exception("DB error on bad policy"),
-            None,  # не найден → создать
+            None,  # not found → create
         ]
         mock_policy_repo.create.return_value = MagicMock()
 
         result = await service.sync_policies_from_provider()
 
-        # Несмотря на ошибку первой политики, вторая должна быть создана
+        # Despite the first policy error, the second should be created
         assert isinstance(result, dict)
         assert result["total_remote"] == 2
         assert result["created"] >= 1
@@ -610,7 +610,7 @@ class TestSyncPoliciesFromProvider:
 
 
 class TestErrorHandling:
-    """Общие тесты обработки ошибок (спецификация §8)."""
+    """General error handling tests (specification §8)."""
 
     @pytest.mark.asyncio
     async def test_db_error_returns_unknown_gateway_error(
@@ -639,17 +639,17 @@ class TestErrorHandling:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Конструктор
+# Constructor
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestPolicyServiceConstructor:
-    """Тесты конструктора PolicyService (спецификация §2)."""
+    """Constructor tests for PolicyService (specification §2)."""
 
     def test_constructor_accepts_all_dependencies(
         self, mock_policy_repo, mock_provider_repo, mock_adapter, mock_log_service
     ):
-        """PolicyService принимает 4 зависимости через конструктор."""
+        """PolicyService accepts 4 зависимости via constructor."""
         svc = PolicyService(
             policy_repo=mock_policy_repo,
             provider_repo=mock_provider_repo,

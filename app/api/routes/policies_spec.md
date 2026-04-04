@@ -1,119 +1,119 @@
-# Спецификация: Роутер политик безопасности (policies.py)
+# Specification: Security Policies Router (policies.py)
 
-> **Файл реализации:** `policies.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** HTTP-обработчики для CRUD-операций над политиками (Guardrails) и синхронизации с облаком
-
----
-
-## 1. Общие правила
-
-- Роуты — тонкие обёртки: принимают HTTP-запрос, вызывают сервис, возвращают HTTP-ответ.
-- Бизнес-логика **запрещена** в роутах — только маршрутизация и трансформация.
-- Все зависимости получаются через FastAPI Depends.
-- Pydantic-схемы для request/response определяются в этом файле.
+> **Implementation file:** `policies.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** HTTP handlers for CRUD operations on policies (Guardrails) and cloud synchronization
 
 ---
 
-## 2. Роутер
+## 1. General Rules
 
-**Префикс:** `/api/policies`  
-**Теги:** "Policies"  
-**Защита:** HTTP Basic Auth.
-
----
-
-## 3. Эндпоинт: GET /api/policies/
-
-### Назначение
-
-Список всех активных политик.
-
-### Пошаговая логика
-
-1. Вызвать policy_service.list_policies().
-2. Вернуть HTTP 200 со списком политик.
+- Routes are thin wrappers: accept an HTTP request, call the service, return an HTTP response.
+- Business logic is **prohibited** in routes — only routing and transformation.
+- All dependencies are obtained via FastAPI Depends.
+- Pydantic schemas for request/response are defined in this file.
 
 ---
 
-## 4. Эндпоинт: POST /api/policies/
+## 2. Router
 
-### Назначение
-
-Создание новой политики (с синхронизацией в облако).
-
-### Request Body (схема PolicyCreateRequest)
-
-| Поле            | Тип     | Обязательное | По умолчанию | Описание                    |
-|-----------------|---------|--------------|--------------|-----------------------------|
-| `name`          | строка  | Да           | —            | Название политики            |
-| `body`          | словарь | Да           | —            | JSON-тело конфигурации       |
-| `provider_name` | строка  | Нет          | "portkey"    | Имя провайдера               |
-
-### Пошаговая логика
-
-1. Вызвать policy_service.create_policy(name, body, provider_name).
-2. Если успех → HTTP 201 с данными политики.
-3. Если GatewayError → HTTP с соответствующим статусом.
+**Prefix:** `/api/policies`  
+**Tags:** "Policies"  
+**Protection:** HTTP Basic Auth.
 
 ---
 
-## 5. Эндпоинт: PUT /api/policies/{policy_id}
+## 3. Endpoint: GET /api/policies/
 
-### Назначение
+### Purpose
 
-Обновление политики.
+List all active policies.
 
-### Request Body (схема PolicyUpdateRequest)
+### Step-by-Step Logic
 
-| Поле   | Тип              | Обязательное | Описание                          |
-|--------|------------------|--------------|------------------------------------|
-| `name` | строка или null  | Нет          | Новое название (если меняется)     |
-| `body` | словарь или null | Нет          | Новое JSON-тело (если меняется)    |
+1. Call policy_service.list_policies().
+2. Return HTTP 200 with the list of policies.
 
 ---
 
-## 6. Эндпоинт: DELETE /api/policies/{policy_id}
+## 4. Endpoint: POST /api/policies/
 
-### Назначение
+### Purpose
 
-Soft Delete политики (с удалением в облаке).
+Create a new policy (with cloud synchronization).
 
-### Пошаговая логика
+### Request Body (PolicyCreateRequest schema)
 
-1. Вызвать policy_service.delete_policy(policy_id).
-2. Если успех → HTTP 200 с JSON-телом, содержащим поле status со значением "deleted".
-3. Если ошибка → HTTP с соответствующим статусом.
+| Field           | Type    | Required | Default      | Description                 |
+|-----------------|---------|----------|--------------|-----------------------------|
+| `name`          | string  | Yes      | —            | Policy name                 |
+| `body`          | dict    | Yes      | —            | JSON configuration body     |
+| `provider_name` | string  | No       | "portkey"    | Provider name               |
 
----
+### Step-by-Step Logic
 
-## 7. Эндпоинт: POST /api/policies/sync
-
-### Назначение
-
-Синхронизация политик из облака провайдера (кнопка «Синхронизация»).
-
-### Request Body (схема SyncRequest)
-
-| Поле            | Тип    | Обязательное | По умолчанию | Описание       |
-|-----------------|--------|--------------|--------------|----------------|
-| `provider_name` | строка | Нет          | "portkey"    | Имя провайдера |
-
-### Пошаговая логика
-
-1. Вызвать policy_service.sync_policies_from_provider(provider_name).
-2. Вернуть HTTP 200 с отчётом о синхронизации.
+1. Call policy_service.create_policy(name, body, provider_name).
+2. On success → HTTP 201 with policy data.
+3. On GatewayError → HTTP with corresponding status.
 
 ---
 
-## 8. Обработка ошибок
+## 5. Endpoint: PUT /api/policies/{policy_id}
 
-| HTTP-статус | Когда                                    |
+### Purpose
+
+Update a policy.
+
+### Request Body (PolicyUpdateRequest schema)
+
+| Field  | Type             | Required | Description                       |
+|--------|------------------|----------|-----------------------------------|
+| `name` | string or null   | No       | New name (if changing)            |
+| `body` | dict or null     | No       | New JSON body (if changing)       |
+
+---
+
+## 6. Endpoint: DELETE /api/policies/{policy_id}
+
+### Purpose
+
+Soft Delete a policy (with cloud deletion).
+
+### Step-by-Step Logic
+
+1. Call policy_service.delete_policy(policy_id).
+2. On success → HTTP 200 with JSON body containing a status field with value "deleted".
+3. On error → HTTP with corresponding status.
+
+---
+
+## 7. Endpoint: POST /api/policies/sync
+
+### Purpose
+
+Synchronize policies from the provider cloud ("Sync" button).
+
+### Request Body (SyncRequest schema)
+
+| Field           | Type   | Required | Default      | Description    |
+|-----------------|--------|----------|--------------|----------------|
+| `provider_name` | string | No       | "portkey"    | Provider name  |
+
+### Step-by-Step Logic
+
+1. Call policy_service.sync_policies_from_provider(provider_name).
+2. Return HTTP 200 with the synchronization report.
+
+---
+
+## 8. Error Handling
+
+| HTTP Status | When                                     |
 |-------------|------------------------------------------|
-| 200         | Успешная операция                        |
-| 201         | Успешное создание ресурса                |
-| 401         | Невалидный токен / не авторизован        |
-| 404         | Ресурс не найден                         |
-| 422         | Невалидный JSON (Pydantic)               |
-| 500         | Внутренняя ошибка сервера                |
-| 502         | Ошибка провайдера                        |
+| 200         | Successful operation                     |
+| 201         | Successful resource creation             |
+| 401         | Invalid token / unauthorized             |
+| 404         | Resource not found                       |
+| 422         | Invalid JSON (Pydantic)                  |
+| 500         | Internal server error                    |
+| 502         | Provider error                           |

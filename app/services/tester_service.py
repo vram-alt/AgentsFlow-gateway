@@ -1,11 +1,12 @@
-"""TesterService — оркестратор для модуля Testing Console.
+"""TesterService — orchestrator for the Testing Console module.
 
-Спецификация: app/services/tester_service_spec.md
+Specification: app/services/tester_service_spec.md
 """
 
 from __future__ import annotations
 
 import logging
+import os
 import time
 import uuid
 from typing import Any
@@ -19,7 +20,7 @@ from app.infrastructure.database.repositories import ProviderRepository
 
 logger = logging.getLogger(__name__)
 
-# Допустимые заголовки ответа (allowlist)
+# Allowed response headers (allowlist)
 _ALLOWED_RESPONSE_HEADERS = frozenset(
     {
         "content-type",
@@ -29,21 +30,90 @@ _ALLOWED_RESPONSE_HEADERS = frozenset(
     }
 )
 
-# Максимальный размер ответа: 10 МБ
+# Maximum response size: 10 MB
 _MAX_RESPONSE_SIZE = 10_485_760
 
 
 class TesterService:
-    """Оркестратор для модуля Testing Console (§1)."""
+    """Orchestrator for the Testing Console module (§1)."""
 
     def __init__(
         self,
         provider_repo: ProviderRepository,
         http_client: httpx.AsyncClient,
     ) -> None:
-        """§1.1 Конструктор."""
+        """§1.1 Constructor."""
         self.provider_repo = provider_repo
         self.http_client = http_client
+
+    @staticmethod
+    def _is_demo_mode() -> bool:
+        """Check if demo mode is enabled via DEMO_MODE environment variable."""
+        return os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes")
+
+    @staticmethod
+    def _demo_proxy_response(
+        method: str, path: str, body: dict[str, Any] | None, latency_ms: float
+    ) -> dict[str, Any]:
+        """Generate a simulated proxy response for demo mode."""
+        demo_body: dict[str, Any] = {
+            "demo": True,
+            "message": (
+                "[DEMO MODE] This is a simulated proxy response. "
+                "No real LLM API key is configured. "
+                "To get real responses, add a valid API key in Configuration > Providers."
+            ),
+        }
+        # If it looks like a chat completions request, return a realistic response
+        if body and "messages" in body:
+            user_msg = ""
+            for m in body.get("messages", []):
+                if isinstance(m, dict) and m.get("role") == "user":
+                    user_msg = m.get("content", "")
+                    break
+            demo_body = {
+                "id": f"demo-{uuid.uuid4().hex[:8]}",
+                "object": "chat.completion",
+                "model": body.get("model", "demo-model"),
+                "choices": [
+                    {
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": (
+                                f'[DEMO MODE] Simulated response to: "{user_msg}". '
+                                "Configure a real API key for actual LLM responses."
+                            ),
+                        },
+                        "finish_reason": "stop",
+                    }
+                ],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 20,
+                    "total_tokens": 30,
+                },
+                "demo": True,
+            }
+        # If it looks like a models list request
+        elif path.rstrip("/").endswith("/models") and method.upper() == "GET":
+            demo_body = {
+                "object": "list",
+                "data": [
+                    {"id": "gpt-4", "object": "model", "owned_by": "demo"},
+                    {"id": "gpt-4o-mini", "object": "model", "owned_by": "demo"},
+                    {"id": "gpt-3.5-turbo", "object": "model", "owned_by": "demo"},
+                    {"id": "claude-3-opus", "object": "model", "owned_by": "demo"},
+                ],
+                "demo": True,
+            }
+
+        return {
+            "status_code": 200,
+            "headers": {"content-type": "application/json"},
+            "body": demo_body,
+            "latency_ms": latency_ms,
+        }
 
     async def proxy_request(
         self,
@@ -53,7 +123,7 @@ class TesterService:
         body: dict[str, Any] | None,
         headers: dict[str, str] | None,
     ) -> dict[str, Any] | GatewayError:
-        """§1.2 Метод proxy_request."""
+        """§1.2 Method proxy_request."""
         trace_id = str(uuid.uuid4())
 
         logger.info(
@@ -63,7 +133,7 @@ class TesterService:
             path,
         )
 
-        # §1.2 п.1: Валидация path
+        # §1.2 step 1: Path validation
         decoded_path = unquote(unquote(path))
         if "://" in decoded_path:
             return GatewayError(
@@ -80,7 +150,7 @@ class TesterService:
                 status_code=422,
             )
 
-        # §1.2 п.2: Получение провайдера
+        # §1.2 step 2: Fetch provider
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
             return GatewayError(
@@ -93,13 +163,13 @@ class TesterService:
         api_key: str = provider.api_key
         base_url: str = provider.base_url
 
-        # §1.2 п.3: Формирование URL
+        # §1.2 step 3: Build URL
         url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
 
-        # §1.2 п.4: SSRF-валидация итогового URL
+        # §1.2 step 4: SSRF validation of the final URL
         parsed_url = urlparse(url)
 
-        # [RED-3] Проверка hostname на приватный IP (включая DNS rebinding)
+        # [RED-3] Check hostname for private IP (including DNS rebinding)
         hostname = parsed_url.hostname or ""
         if _is_private_ip(hostname):
             return GatewayError(
@@ -109,22 +179,34 @@ class TesterService:
                 status_code=422,
             )
 
-        # §1.2 п.5: Формирование заголовков
+        # §1.2 step 5: Build headers
+        # x-portkey-provider is required by Portkey API to route to the correct LLM
         request_headers: dict[str, str] = {
             "x-portkey-api-key": api_key,
+            "x-portkey-provider": "openai",
             "Content-Type": "application/json",
         }
         if headers is not None:
             for key, value in headers.items():
-                # Защита: не перезаписывать x-portkey-api-key (регистронезависимо)
+                # Protection: do not overwrite x-portkey-api-key (case-insensitive)
                 if key.lower() == "x-portkey-api-key":
                     continue
                 request_headers[key] = value
 
-        # §1.2 п.6: Замер времени
+        # Infer x-portkey-provider from model in body if available
+        if body and isinstance(body.get("model"), str):
+            from app.infrastructure.adapters.portkey_adapter import (
+                _infer_provider_from_model,
+            )
+
+            request_headers["x-portkey-provider"] = _infer_provider_from_model(
+                body["model"]
+            )
+
+        # §1.2 step 6: Time measurement
         start_time = time.monotonic()
 
-        # §1.2 п.7-8: Выполнение HTTP-запроса
+        # §1.2 steps 7-8: Execute HTTP request
         try:
             response = await self.http_client.request(
                 method=method,
@@ -156,11 +238,16 @@ class TesterService:
                 status_code=500,
             )
 
-        # §1.2 п.9: Вычисление latency
+        # §1.2 step 9: Compute latency
         elapsed = time.monotonic() - start_time
         latency_ms = round(elapsed * 1000, 2)
 
-        # §1.2 п.10: Ограничение размера ответа
+        # Demo fallback: if provider returns auth error and DEMO_MODE is enabled,
+        # return a simulated successful response instead of the real error.
+        if response.status_code in (401, 403) and self._is_demo_mode():
+            return self._demo_proxy_response(method, path, body, latency_ms)
+
+        # §1.2 step 10: Response size limit
         content = response.content
         if len(content) > _MAX_RESPONSE_SIZE:
             return GatewayError(
@@ -170,13 +257,13 @@ class TesterService:
                 status_code=502,
             )
 
-        # §1.2 п.11: Парсинг ответа
+        # §1.2 step 11: Parse response
         try:
             response_body: Any = response.json()
         except (ValueError, Exception):
             response_body = response.text
 
-        # §1.2 п.12: Фильтрация заголовков ответа
+        # §1.2 step 12: Filter response headers
         filtered_headers: dict[str, str] = {}
         for key, value in response.headers.items():
             if key.lower() in _ALLOWED_RESPONSE_HEADERS:

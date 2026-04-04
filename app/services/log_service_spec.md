@@ -1,292 +1,292 @@
-# Спецификация: Сервис логирования (LogService)
+# Specification: Logging Service (LogService)
 
-> **Файл реализации:** `log_service.py`  
-> **Слой:** Services / Use Cases  
-> **Ответственность:** Единое журналирование всех событий системы (чат, инциденты, ошибки), экспорт и аналитика
-
----
-
-## 1. Общие правила
-
-- Сервис является **единой точкой входа** для записи любых событий в журнал.
-- Все методы записи — асинхронные, предназначены для вызова из `BackgroundTasks`.
-- Ошибки логирования **никогда не пробрасываются** наружу — подавляются и записываются в stderr.
-- Сериализация `payload` (dict → JSON-строка) делегируется в `LogRepository`.
+> **Implementation file:** `log_service.py`  
+> **Layer:** Services / Use Cases  
+> **Responsibility:** Unified logging of all system events (chat, incidents, errors), export, and analytics
 
 ---
 
-## 2. Класс: LogService
+## 1. General Rules
 
-### Зависимости (через конструктор)
+- The service is the **single entry point** for writing any events to the audit log.
+- All write methods are asynchronous, intended to be called from `BackgroundTasks`.
+- Logging errors are **never propagated** to the caller — they are suppressed and written to stderr.
+- Serialization of `payload` (dict → JSON string) is delegated to `LogRepository`.
 
-| Параметр    | Тип              | Описание                                    |
+---
+
+## 2. Class: LogService
+
+### Dependencies (via constructor)
+
+| Parameter   | Type             | Description                                 |
 |-------------|------------------|---------------------------------------------|
-| `log_repo`  | `LogRepository`  | Репозиторий для записи в таблицу `logs`     |
+| `log_repo`  | `LogRepository`  | Repository for writing to the `logs` table  |
 
 ---
 
-## 3. Метод: log_chat_request
+## 3. Method: log_chat_request
 
-### Назначение
+### Purpose
 
-Запись события отправки промпта и получения ответа от LLM.
+Record a prompt submission and LLM response event.
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий следующие параметры:
-  - `trace_id` (строка) — сквозной идентификатор запроса.
-  - `prompt_data` (словарь) — данные отправленного промпта.
-  - `response_data` (словарь) — данные полученного ответа.
-  - `is_error` (булево, по умолчанию False) — флаг ошибочного ответа.
-- **Возвращает:** ничего.
+- **Async method** accepting the following parameters:
+  - `trace_id` (string) — request correlation identifier.
+  - `prompt_data` (dict) — submitted prompt data.
+  - `response_data` (dict) — received response data.
+  - `is_error` (boolean, default False) — error response flag.
+- **Returns:** nothing.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Сформировать payload** — словарь со следующими ключами:
-   - `prompt` — данные отправленного промпта (из параметра `prompt_data`)
-   - `response` — данные полученного ответа (из параметра `response_data`)
-   - `is_error` — флаг, был ли ответ ошибочным (из параметра `is_error`)
-   - `logged_at` — текущая дата-время в формате ISO 8601 (UTC)
+1. **Build payload** — a dict with the following keys:
+   - `prompt` — submitted prompt data (from `prompt_data` parameter)
+   - `response` — received response data (from `response_data` parameter)
+   - `is_error` — flag indicating whether the response was an error (from `is_error` parameter)
+   - `logged_at` — current datetime in ISO 8601 format (UTC)
 
-2. **Записать в БД:**
+2. **Write to DB:**
    - `event_type = EventType.CHAT_REQUEST`
-   - Вызвать `log_repo.create(trace_id, event_type, payload)`.
+   - Call `log_repo.create(trace_id, event_type, payload)`.
 
-3. **При ошибке записи:** подавить исключение, вывести в stderr через `logging.error(...)`.
+3. **On write error:** suppress the exception, output to stderr via `logging.error(...)`.
 
 ---
 
-## 4. Метод: log_guardrail_incident
+## 4. Method: log_guardrail_incident
 
-### Назначение
+### Purpose
 
-Запись события срабатывания Guardrail (из webhook).
+Record a Guardrail trigger event (from webhook).
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий два параметра: `trace_id` (строка — сквозной идентификатор) и `incident_data` (словарь — данные инцидента).
-- **Возвращает:** ничего.
+- **Async method** accepting two parameters: `trace_id` (string — correlation identifier) and `incident_data` (dict — incident data).
+- **Returns:** nothing.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Сформировать payload** — словарь со следующими ключами:
-   - `incident` — данные инцидента (из параметра `incident_data`)
-   - `logged_at` — текущая дата-время в формате ISO 8601 (UTC)
+1. **Build payload** — a dict with the following keys:
+   - `incident` — incident data (from `incident_data` parameter)
+   - `logged_at` — current datetime in ISO 8601 format (UTC)
 
-2. **Записать в БД:**
+2. **Write to DB:**
    - `event_type = EventType.GUARDRAIL_INCIDENT`
-   - Вызвать `log_repo.create(trace_id, event_type, payload)`.
+   - Call `log_repo.create(trace_id, event_type, payload)`.
 
-3. **При ошибке записи:** подавить, логировать в stderr.
+3. **On write error:** suppress, log to stderr.
 
 ---
 
-## 5. Метод: log_system_error
+## 5. Method: log_system_error
 
-### Назначение
+### Purpose
 
-Запись системной ошибки (сбой адаптера, ошибка БД и т.д.).
+Record a system error (adapter failure, DB error, etc.).
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий два параметра: `trace_id` (строка — сквозной идентификатор) и `error_data` (словарь — данные ошибки).
-- **Возвращает:** ничего.
+- **Async method** accepting two parameters: `trace_id` (string — correlation identifier) and `error_data` (dict — error data).
+- **Returns:** nothing.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Сформировать payload** — словарь со следующими ключами:
-   - `error` — данные ошибки (из параметра `error_data`)
-   - `logged_at` — текущая дата-время в формате ISO 8601 (UTC)
+1. **Build payload** — a dict with the following keys:
+   - `error` — error data (from `error_data` parameter)
+   - `logged_at` — current datetime in ISO 8601 format (UTC)
 
-2. **Записать в БД:**
+2. **Write to DB:**
    - `event_type = EventType.SYSTEM_ERROR`
-   - Вызвать `log_repo.create(trace_id, event_type, payload)`.
+   - Call `log_repo.create(trace_id, event_type, payload)`.
 
-3. **При ошибке записи:** подавить, логировать в stderr.
-
----
-
-## 6. Метод: get_logs
-
-### Назначение
-
-Получение списка событий для отображения в UI-журнале.
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий следующие параметры:
-  - `limit` (целое число, по умолчанию 100) — количество записей.
-  - `offset` (целое число, по умолчанию 0) — смещение.
-  - `event_type` (строка или отсутствует) — фильтр по типу события.
-- **Возвращает:** список доменных сущностей LogEntry.
-
-### Пошаговая логика
-
-1. Если `event_type` задан → вызвать `log_repo.list_by_type(event_type, limit, offset)`.
-2. Иначе → вызвать `log_repo.list_all(limit, offset)`.
-3. Преобразовать ORM-модели в доменные сущности `LogEntry`.
-4. Вернуть список.
+3. **On write error:** suppress, log to stderr.
 
 ---
 
-## 7. Метод: get_logs_by_trace_id
+## 6. Method: get_logs
 
-### Назначение
+### Purpose
 
-Получение всех событий по сквозному `trace_id` (для связи промпта с инцидентами).
+Retrieve a list of events for display in the UI log viewer.
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий один параметр: `trace_id` (строка — сквозной идентификатор).
-- **Возвращает:** список доменных сущностей LogEntry.
+- **Async method** accepting the following parameters:
+  - `limit` (integer, default 100) — number of records.
+  - `offset` (integer, default 0) — offset.
+  - `event_type` (string or absent) — filter by event type.
+- **Returns:** list of LogEntry domain entities.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. Вызвать `log_repo.get_by_trace_id(trace_id)`.
-2. Преобразовать в доменные сущности.
-3. Вернуть список (может содержать `chat_request` + `guardrail_incident`).
-
----
-
-## 8. Метод: get_log_stats
-
-### Назначение
-
-Получение статистики для дашборда (количество событий по типам).
-
-### Описание интерфейса
-
-- **Асинхронный метод** без параметров.
-- **Возвращает:** словарь со статистикой по типам событий.
-
-### Возвращает
-
-Словарь со следующими ключами:
-
-| Ключ                    | Тип   | Описание                                  |
-|-------------------------|-------|-------------------------------------------|
-| `total`                 | целое | Общее количество записей в журнале        |
-| `chat_requests`         | целое | Количество событий типа CHAT_REQUEST      |
-| `guardrail_incidents`   | целое | Количество событий типа GUARDRAIL_INCIDENT|
-| `system_errors`         | целое | Количество событий типа SYSTEM_ERROR      |
+1. If `event_type` is provided → call `log_repo.list_by_type(event_type, limit, offset)`.
+2. Otherwise → call `log_repo.list_all(limit, offset)`.
+3. Convert ORM models to `LogEntry` domain entities.
+4. Return the list.
 
 ---
 
-## 9. Метод: get_stats_summary
+## 7. Method: get_logs_by_trace_id
 
-### Назначение
+### Purpose
 
-Расширенная версия статистики для дашборда. Включает все данные из существующего `get_log_stats()` плюс агрегированные данные по токенам и latency.
+Retrieve all events by correlation `trace_id` (for linking prompts with incidents).
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод** без параметров.
-- **Возвращает:** словарь с шестью ключами.
+- **Async method** accepting one parameter: `trace_id` (string — correlation identifier).
+- **Returns:** list of LogEntry domain entities.
 
-### Алгоритм
+### Step-by-Step Logic
 
-1. Вызвать существующий метод `self.get_log_stats()` для получения базовой статистики (`total`, `chat_requests`, `guardrail_incidents`, `system_errors`).
-2. Вызвать `self.log_repo.aggregate_token_stats()` для получения агрегированных данных (`total_tokens`, `avg_latency_ms`).
-3. Объединить оба словаря в один и вернуть результат с ключами: `total`, `chat_requests`, `guardrail_incidents`, `system_errors`, `total_tokens`, `avg_latency_ms`.
-
-### Согласованность данных (Race Condition)
-
-Метод выполняет два отдельных запроса к БД без единой транзакции. Между вызовами могут быть вставлены новые записи, что приведёт к незначительной несогласованности данных. Это допустимо для дашборда, поскольку данные носят информационный характер и обновляются при следующем запросе.
-
-### Обработка ошибок
-
-- Если `aggregate_token_stats()` выбрасывает исключение — логировать ошибку на уровне WARNING и вернуть `total_tokens` = 0, `avg_latency_ms` = 0.0 (graceful degradation). Базовая статистика при этом возвращается нормально.
+1. Call `log_repo.get_by_trace_id(trace_id)`.
+2. Convert to domain entities.
+3. Return the list (may contain `chat_request` + `guardrail_incident`).
 
 ---
 
-## 10. Метод: get_chart_data
+## 8. Method: get_log_stats
 
-### Назначение
+### Purpose
 
-Получение данных для графика активности — количество событий по часам.
+Retrieve statistics for the dashboard (event counts by type).
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий один параметр: `hours` (целое число, по умолчанию 24).
-- **Возвращает:** список словарей с ключами `hour` и `count`.
+- **Async method** with no parameters.
+- **Returns:** dict with event type statistics.
 
-### Алгоритм
+### Returns
 
-1. Вычислить временную метку `since` = текущее UTC-время минус `hours` часов.
-2. Вызвать `self.log_repo.count_by_hour(since=since)`.
-3. Преобразовать список кортежей (hour_string, count) в список словарей с ключами `hour` и `count`.
-4. Вернуть результат.
+A dict with the following keys:
 
-### Обработка ошибок
-
-- Исключения из репозитория пробрасываются наверх (обрабатываются роутером).
-
----
-
-## 11. Метод: get_log_by_id
-
-### Назначение
-
-Получение одной записи лога по числовому ID. Необходим для эндпоинта POST /api/logs/{id}/replay.
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий один параметр: `log_id` (целое число).
-- **Возвращает:** экземпляр LogEntryModel или None.
-
-### Алгоритм
-
-1. Вызвать `self.log_repo.get_by_id(log_id)`.
-2. Вернуть результат.
+| Key                     | Type    | Description                               |
+|-------------------------|---------|-------------------------------------------|
+| `total`                 | integer | Total number of records in the log        |
+| `chat_requests`         | integer | Number of CHAT_REQUEST events             |
+| `guardrail_incidents`   | integer | Number of GUARDRAIL_INCIDENT events       |
+| `system_errors`         | integer | Number of SYSTEM_ERROR events             |
 
 ---
 
-## 12. Метод: export_logs
+## 9. Method: get_stats_summary
 
-### Назначение
+### Purpose
 
-Генерация CSV-данных для экспорта логов. Возвращает асинхронный генератор строк CSV.
+Extended dashboard statistics. Includes all data from the existing `get_log_stats()` plus aggregated token and latency data.
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный генератор**, принимающий два параметра:
-  - `event_type` (строка или None) — фильтр по типу события.
-  - `limit` (целое число, по умолчанию 10000) — максимальное количество записей.
-- **Yield:** строки CSV (включая заголовок).
+- **Async method** with no parameters.
+- **Returns:** dict with six keys.
 
-### Алгоритм
+### Algorithm
 
-1. Логировать аудит-событие на уровне INFO: "CSV export started", с указанием event_type, limit. Информация о вызывающем пользователе передаётся из роутера (если доступна).
-2. Инициализировать счётчик экспортированных записей (для аудит-лога).
-3. Yield строку заголовка CSV: "id,trace_id,event_type,created_at,payload\n".
-4. Вызвать `self.log_repo.list_for_export(event_type=event_type, limit=limit)`.
-5. Для каждой записи из результата:
-   a. Сформировать строку CSV с полями: `id`, `trace_id`, `event_type`, `created_at` (в формате ISO 8601), `payload` (JSON-строка, экранированная для CSV — обернуть в двойные кавычки, внутренние двойные кавычки удвоить).
-   b. **CSV Injection защита**: перед записью значения payload в CSV проверить, начинается ли строковое значение с символов `=`, `+`, `-`, `@`, `\t`, `\r`. Если да — добавить префикс в виде одинарной кавычки перед значением для предотвращения выполнения формул при открытии в Excel.
-   c. Инкрементировать счётчик.
-   d. Yield сформированную строку.
-6. По завершении итерации — логировать аудит-событие на уровне INFO: "CSV export completed", с указанием количества экспортированных записей.
+1. Call the existing method `self.get_log_stats()` to obtain base statistics (`total`, `chat_requests`, `guardrail_incidents`, `system_errors`).
+2. Call `self.log_repo.aggregate_token_stats()` to obtain aggregated data (`total_tokens`, `avg_latency_ms`).
+3. Merge both dicts into one and return the result with keys: `total`, `chat_requests`, `guardrail_incidents`, `system_errors`, `total_tokens`, `avg_latency_ms`.
 
-### Обработка ошибок (Streaming Error Handling)
+### Data Consistency (Race Condition)
 
-- Если запрос к репозиторию или итерация по записям выбрасывает исключение ПОСЛЕ начала генерации (HTTP-заголовки уже отправлены клиенту) — yield строку-маркер ошибки: `# ERROR: export interrupted\n`. Это позволяет клиенту детектировать неполный экспорт. Затем логировать ошибку на уровне ERROR и завершить генератор.
-- Если исключение произошло ДО первого yield — пробросить исключение наверх (роутер вернёт HTTP 500).
+The method executes two separate DB queries without a single transaction. New records may be inserted between calls, leading to minor data inconsistency. This is acceptable for a dashboard since the data is informational and refreshes on the next request.
 
-### Безопасность и PII
+### Error Handling
 
-- CSV-экспорт включает полный `payload`, который может содержать промпты пользователей и ответы LLM (PII/конфиденциальные данные).
-- Каждый вызов export ДОЛЖЕН логироваться как аудит-событие (кто вызвал, когда, сколько записей экспортировано).
-- Доступ к экспорту ограничен аутентификацией (HTTP Basic Auth на уровне роутера).
-- Значения payload экранируются для защиты от CSV Injection.
+- If `aggregate_token_stats()` raises an exception — log the error at WARNING level and return `total_tokens` = 0, `avg_latency_ms` = 0.0 (graceful degradation). Base statistics are returned normally.
 
 ---
 
-## 13. Обработка ошибок
+## 10. Method: get_chart_data
 
-| Ситуация                        | Действие                                          |
+### Purpose
+
+Retrieve data for the activity chart — event counts by hour.
+
+### Interface Description
+
+- **Async method** accepting one parameter: `hours` (integer, default 24).
+- **Returns:** list of dicts with keys `hour` and `count`.
+
+### Algorithm
+
+1. Compute the timestamp `since` = current UTC time minus `hours` hours.
+2. Call `self.log_repo.count_by_hour(since=since)`.
+3. Convert the list of tuples (hour_string, count) into a list of dicts with keys `hour` and `count`.
+4. Return the result.
+
+### Error Handling
+
+- Repository exceptions are propagated upstream (handled by the router).
+
+---
+
+## 11. Method: get_log_by_id
+
+### Purpose
+
+Retrieve a single log record by numeric ID. Required for the POST /api/logs/{id}/replay endpoint.
+
+### Interface Description
+
+- **Async method** accepting one parameter: `log_id` (integer).
+- **Returns:** LogEntryModel instance or None.
+
+### Algorithm
+
+1. Call `self.log_repo.get_by_id(log_id)`.
+2. Return the result.
+
+---
+
+## 12. Method: export_logs
+
+### Purpose
+
+Generate CSV data for log export. Returns an async generator of CSV strings.
+
+### Interface Description
+
+- **Async generator** accepting two parameters:
+  - `event_type` (string or None) — filter by event type.
+  - `limit` (integer, default 10000) — maximum number of records.
+- **Yield:** CSV strings (including header).
+
+### Algorithm
+
+1. Log an audit event at INFO level: "CSV export started", specifying event_type, limit. Caller user information is passed from the router (if available).
+2. Initialize an exported records counter (for the audit log).
+3. Yield the CSV header string: "id,trace_id,event_type,created_at,payload\n".
+4. Call `self.log_repo.list_for_export(event_type=event_type, limit=limit)`.
+5. For each record in the result:
+   a. Build a CSV string with fields: `id`, `trace_id`, `event_type`, `created_at` (in ISO 8601 format), `payload` (JSON string, escaped for CSV — wrap in double quotes, double internal double quotes).
+   b. **CSV Injection protection**: before writing the payload value to CSV, check if the string value starts with characters `=`, `+`, `-`, `@`, `\t`, `\r`. If so — prepend a single quote prefix to prevent formula execution when opened in Excel.
+   c. Increment the counter.
+   d. Yield the built string.
+6. Upon iteration completion — log an audit event at INFO level: "CSV export completed", specifying the number of exported records.
+
+### Error Handling (Streaming Error Handling)
+
+- If the repository query or record iteration raises an exception AFTER generation has started (HTTP headers already sent to client) — yield an error marker string: `# ERROR: export interrupted\n`. This allows the client to detect an incomplete export. Then log the error at ERROR level and terminate the generator.
+- If the exception occurs BEFORE the first yield — propagate the exception upstream (router returns HTTP 500).
+
+### Security and PII
+
+- CSV export includes the full `payload`, which may contain user prompts and LLM responses (PII/confidential data).
+- Every export call MUST be logged as an audit event (who called, when, how many records exported).
+- Export access is restricted by authentication (HTTP Basic Auth at the router level).
+- Payload values are escaped for CSV Injection protection.
+
+---
+
+## 13. Error Handling
+
+| Scenario                        | Action                                            |
 |---------------------------------|---------------------------------------------------|
-| Ошибка БД при записи лога       | Подавить, вывести в stderr через `logging.error`  |
-| Ошибка БД при чтении логов      | Пробросить наверх (для отображения в UI)          |
-| Невалидный payload              | Записать как есть (Text-поле принимает любой JSON)|
-| Ошибка aggregate_token_stats    | WARNING-лог, graceful degradation (нули)          |
-| Ошибка при потоковом экспорте   | Yield маркер ошибки, ERROR-лог, завершить генератор|
+| DB error on log write           | Suppress, output to stderr via `logging.error`    |
+| DB error on log read            | Propagate upstream (for UI display)               |
+| Invalid payload                 | Write as-is (Text field accepts any JSON)         |
+| aggregate_token_stats error     | WARNING log, graceful degradation (zeros)         |
+| Streaming export error          | Yield error marker, ERROR log, terminate generator|

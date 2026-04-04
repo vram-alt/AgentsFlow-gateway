@@ -1,157 +1,157 @@
-# Спецификация: app/api/routes/tester.py
+# Specification: app/api/routes/tester.py
 
-## Назначение
+## Purpose
 
-Роутер модуля «Testing Console» — предоставляет эндпоинты для интерактивного тестирования LLM-провайдеров из UI. Позволяет получить JSON-схему формы тестирования и отправить произвольный запрос к провайдеру через прокси. Реализует файл `app/api/routes/tester.py`.
-
----
-
-## §1. Общие сведения
-
-- **Префикс**: `/api/tester`
-- **Теги OpenAPI**: `["Tester"]`
-- **Аутентификация**: все эндпоинты защищены зависимостью `get_current_user` (HTTP Basic Auth).
-- **Зависимости**: `TesterService` (через DI-фабрику `get_tester_service`).
+Router for the "Testing Console" module — provides endpoints for interactive LLM provider testing from the UI. Allows retrieving a JSON schema for the test form and sending arbitrary requests to a provider via proxy. Implements the file `app/api/routes/tester.py`.
 
 ---
 
-## §2. Эндпоинт: GET /api/tester/schema
+## §1. General Information
 
-### §2.1 Назначение
-
-Возвращает захардкоженную JSON-схему, описывающую поля формы тестовой консоли. Фронтенд использует эту схему для динамической генерации UI-формы.
-
-### §2.2 Параметры запроса
-
-Параметры отсутствуют (кроме аутентификации).
-
-### §2.3 Алгоритм обработки
-
-1. Вернуть статический словарь, описывающий структуру формы тестирования.
-2. Никаких обращений к БД или внешним сервисам не требуется.
-
-### §2.4 Формат ответа (HTTP 200)
-
-Словарь со следующей структурой:
-
-- `fields` — список словарей, каждый описывает одно поле формы:
-  - `name` — строка, имя поля (идентификатор для фронтенда).
-  - `type` — строка, тип поля: "text", "textarea", "select", "number".
-  - `label` — строка, человекочитаемая метка поля.
-  - `required` — булево значение, обязательность заполнения.
-  - `default` — значение по умолчанию (строка, число или null).
-  - `options` — список строк (только для type="select"), допустимые значения. Для остальных типов — null.
-
-Обязательные поля формы:
-1. `provider_name` — select, обязательное, варианты: "portkey". По умолчанию: "portkey".
-2. `model` — text, обязательное, без значения по умолчанию.
-3. `prompt` — textarea, обязательное, без значения по умолчанию.
-4. `temperature` — number, необязательное, по умолчанию: 0.7.
-5. `max_tokens` — number, необязательное, по умолчанию: 1024.
-
-### §2.5 Обработка ошибок
-
-Ошибки маловероятны (статические данные). При любом непредвиденном исключении — HTTP 500 с ключом `detail`.
+- **Prefix**: `/api/tester`
+- **OpenAPI Tags**: `["Tester"]`
+- **Authentication**: all endpoints are protected by the `get_current_user` dependency (HTTP Basic Auth).
+- **Dependencies**: `TesterService` (via DI factory `get_tester_service`).
 
 ---
 
-## §3. Эндпоинт: POST /api/tester/proxy
+## §2. Endpoint: GET /api/tester/schema
 
-### §3.1 Назначение
+### §2.1 Purpose
 
-Принимает произвольный JSON-запрос от UI, подклеивает API-ключ и base_url из БД для указанного провайдера, отправляет запрос к внешнему LLM API и возвращает сырой ответ. Это «прозрачный прокси» для тестирования.
+Returns a hardcoded JSON schema describing the test console form fields. The frontend uses this schema for dynamic UI form generation.
 
-### §3.2 Тело запроса (JSON)
+### §2.2 Request Parameters
 
-Pydantic-схема `TesterProxyRequest` (подробная валидация описана в `tester_spec.md` для schemas):
+No parameters (besides authentication).
 
-| Поле | Тип | Обязательное | Описание |
+### §2.3 Processing Algorithm
+
+1. Return a static dict describing the test form structure.
+2. No DB or external service calls are required.
+
+### §2.4 Response Format (HTTP 200)
+
+Dict with the following structure:
+
+- `fields` — list of dicts, each describing one form field:
+  - `name` — string, field name (identifier for the frontend).
+  - `type` — string, field type: "text", "textarea", "select", "number".
+  - `label` — string, human-readable field label.
+  - `required` — boolean, whether the field is mandatory.
+  - `default` — default value (string, number, or null).
+  - `options` — list of strings (only for type="select"), allowed values. For other types — null.
+
+Required form fields:
+1. `provider_name` — select, required, options: "portkey". Default: "portkey".
+2. `model` — text, required, no default value.
+3. `prompt` — textarea, required, no default value.
+4. `temperature` — number, optional, default: 0.7.
+5. `max_tokens` — number, optional, default: 1024.
+
+### §2.5 Error Handling
+
+Errors are unlikely (static data). On any unexpected exception — HTTP 500 with `detail` key.
+
+---
+
+## §3. Endpoint: POST /api/tester/proxy
+
+### §3.1 Purpose
+
+Accepts an arbitrary JSON request from the UI, attaches the API key and base_url from the DB for the specified provider, sends the request to the external LLM API, and returns the raw response. This is a "transparent proxy" for testing.
+
+### §3.2 Request Body (JSON)
+
+Pydantic schema `TesterProxyRequest` (detailed validation described in `tester_spec.md` for schemas):
+
+| Field | Type | Required | Description |
 |---|---|---|---|
-| `provider_name` | str | Да | Имя провайдера из таблицы providers (например, "portkey"). |
-| `method` | str | Нет (по умолчанию "POST") | HTTP-метод для запроса к провайдеру. Допустимые значения: "GET", "POST", "PUT", "DELETE". |
-| `path` | str | Нет (по умолчанию "/chat/completions") | Путь эндпоинта на стороне провайдера (добавляется к base_url). URL-декодируется и валидируется на path traversal и абсолютные URL. |
-| `body` | dict или null | Нет (по умолчанию null) | Произвольное JSON-тело запроса. Максимальный размер сериализованного JSON — 1 МБ. Передаётся как есть к провайдеру. |
-| `headers` | dict или null | Нет (по умолчанию null) | Дополнительные HTTP-заголовки. Максимум 20 заголовков, длина ключа ≤ 128, длина значения ≤ 4096. Фильтруются через allowlist (см. §5.3). |
+| `provider_name` | str | Yes | Provider name from the providers table (e.g., "portkey"). |
+| `method` | str | No (default "POST") | HTTP method for the provider request. Allowed values: "GET", "POST", "PUT", "DELETE". |
+| `path` | str | No (default "/chat/completions") | Endpoint path on the provider side (appended to base_url). URL-decoded and validated for path traversal and absolute URLs. |
+| `body` | dict or null | No (default null) | Arbitrary JSON request body. Maximum serialized JSON size — 1 MB. Passed as-is to the provider. |
+| `headers` | dict or null | No (default null) | Additional HTTP headers. Maximum 20 headers, key length <= 128, value length <= 4096. Filtered via allowlist (see §5.3). |
 
-### §3.3 Алгоритм обработки
+### §3.3 Processing Algorithm
 
-1. Валидировать тело запроса через Pydantic-схему (включая ограничения размера body, количества headers, URL-декодирование path).
-2. Вызвать `tester_service.proxy_request(provider_name, method, path, body, headers)`.
-3. Внутри сервиса:
-   a. Получить провайдера из БД через `ProviderRepository.get_active_by_name(provider_name)`.
-   b. Если провайдер не найден — вернуть ошибку (см. §3.5).
-   c. Сформировать полный URL: `base_url.rstrip("/") + "/" + path.lstrip("/")`.
-   d. **SSRF-валидация итогового URL**: распарсить итоговый URL и проверить, что hostname результирующего URL совпадает с hostname из `base_url` провайдера. Отклонять запросы к приватным IP-адресам: 127.0.0.1, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254 (AWS/cloud metadata). Scheme должен быть "https" (или "http" только в dev-режиме). При нарушении — вернуть VALIDATION_ERROR (422).
-   e. **Фильтрация заголовков**: сформировать заголовки, начиная с обязательных (API-ключ через `x-portkey-api-key`, `Content-Type`). Пользовательские заголовки фильтруются через allowlist (см. §5.3). Заголовок API-ключа НЕ перезаписывается.
-   f. Выполнить HTTP-запрос через httpx.AsyncClient с гранулярными таймаутами (connect=5s, read=из настроек, write=10s, pool=5s).
-   g. Ограничить размер ответа: максимум 10 МБ. При превышении — вернуть RESPONSE_TOO_LARGE (502).
-   h. Вернуть результат.
-4. Роутер формирует ответ из результата сервиса.
+1. Validate the request body via Pydantic schema (including body size limits, header count, URL-decoding of path).
+2. Call `tester_service.proxy_request(provider_name, method, path, body, headers)`.
+3. Inside the service:
+   a. Fetch the provider from DB via `ProviderRepository.get_active_by_name(provider_name)`.
+   b. If provider not found — return error (see §3.5).
+   c. Build the full URL: `base_url.rstrip("/") + "/" + path.lstrip("/")`.
+   d. **SSRF validation of the final URL**: parse the final URL and verify that the resulting URL hostname matches the hostname from the provider's `base_url`. Reject requests to private IP addresses: 127.0.0.1, ::1, 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, 169.254.169.254 (AWS/cloud metadata). Scheme must be "https" (or "http" only in dev mode). On violation — return VALIDATION_ERROR (422).
+   e. **Header filtering**: build headers starting with required ones (API key via `x-portkey-api-key`, `Content-Type`). User headers are filtered via allowlist (see §5.3). The API key header is NOT overwritten.
+   f. Execute the HTTP request via httpx.AsyncClient with granular timeouts (connect=5s, read=from settings, write=10s, pool=5s).
+   g. Limit response size: maximum 10 MB. On exceeding — return RESPONSE_TOO_LARGE (502).
+   h. Return the result.
+4. The router builds the response from the service result.
 
-### §3.4 Формат ответа (HTTP 200)
+### §3.4 Response Format (HTTP 200)
 
-Словарь с ключами:
-- `status_code` — целое число, HTTP-статус ответа от провайдера.
-- `headers` — словарь строк, заголовки ответа от провайдера (только основные: content-type, x-request-id, x-portkey-trace-id, retry-after).
-- `body` — произвольный JSON (словарь или список), тело ответа от провайдера. Если ответ не является валидным JSON — строка с сырым текстом.
-- `latency_ms` — число с плавающей точкой, время выполнения запроса в миллисекундах.
+Dict with keys:
+- `status_code` — integer, HTTP status code from the provider response.
+- `headers` — dict of strings, response headers from the provider (only essential: content-type, x-request-id, x-portkey-trace-id, retry-after).
+- `body` — arbitrary JSON (dict or list), response body from the provider. If the response is not valid JSON — a string with raw text.
+- `latency_ms` — float, request execution time in milliseconds.
 
-### §3.5 Обработка ошибок
+### §3.5 Error Handling
 
-| Ситуация | HTTP-статус | error_code | Описание |
+| Scenario | HTTP Status | error_code | Description |
 |---|---|---|---|
-| Провайдер не найден в БД | 404 | PROVIDER_NOT_FOUND | Провайдер с указанным именем не существует или деактивирован. |
-| Таймаут запроса к провайдеру | 504 | PROXY_TIMEOUT | Внешний провайдер не ответил в пределах таймаута. |
-| Ошибка соединения с провайдером | 502 | PROXY_CONNECTION_ERROR | Не удалось установить соединение с провайдером. |
-| Ответ провайдера слишком большой | 502 | RESPONSE_TOO_LARGE | Размер ответа превышает 10 МБ. |
-| Невалидное тело запроса | 422 | VALIDATION_ERROR | Стандартная ошибка валидации FastAPI/Pydantic. |
-| SSRF-валидация не пройдена | 422 | VALIDATION_ERROR | Итоговый URL указывает на приватный IP или hostname не совпадает с base_url. |
-| Любая другая ошибка | 500 | INTERNAL_ERROR | Непредвиденная ошибка. |
+| Provider not found in DB | 404 | PROVIDER_NOT_FOUND | Provider with the specified name does not exist or is deactivated. |
+| Request timeout to provider | 504 | PROXY_TIMEOUT | External provider did not respond within the timeout. |
+| Connection error with provider | 502 | PROXY_CONNECTION_ERROR | Failed to establish connection with the provider. |
+| Provider response too large | 502 | RESPONSE_TOO_LARGE | Response size exceeds 10 MB. |
+| Invalid request body | 422 | VALIDATION_ERROR | Standard FastAPI/Pydantic validation error. |
+| SSRF validation failed | 422 | VALIDATION_ERROR | Final URL points to a private IP or hostname does not match base_url. |
+| Any other error | 500 | INTERNAL_ERROR | Unexpected error. |
 
-Все ответы об ошибках содержат `trace_id` (UUID v4), `error_code` и `message`.
-
----
-
-## §4. Pydantic-схемы
-
-Определить в файле `app/api/schemas/tester.py`:
-
-1. **TesterProxyRequest** — схема тела запроса для POST /api/tester/proxy (поля описаны в §3.2, валидация описана в `tester_spec.md` для schemas).
-2. **TesterProxyResponse** — схема ответа (поля описаны в §3.4).
-3. **TesterErrorResponse** — схема ошибки с полями: `trace_id`, `error_code`, `message`.
+All error responses contain `trace_id` (UUID v4), `error_code`, and `message`.
 
 ---
 
-## §5. Безопасность
+## §4. Pydantic Schemas
 
-### §5.1 Аутентификация и API-ключи
+Define in file `app/api/schemas/tester.py`:
 
-- Все эндпоинты требуют HTTP Basic Auth через зависимость `get_current_user`.
-- API-ключ провайдера НИКОГДА не возвращается клиенту в ответе. Он используется только для формирования запроса к внешнему API.
-- Заголовок с API-ключом (`x-portkey-api-key`) не может быть перезаписан пользовательскими заголовками из поля `headers` запроса.
+1. **TesterProxyRequest** — request body schema for POST /api/tester/proxy (fields described in §3.2, validation described in `tester_spec.md` for schemas).
+2. **TesterProxyResponse** — response schema (fields described in §3.4).
+3. **TesterErrorResponse** — error schema with fields: `trace_id`, `error_code`, `message`.
 
-### §5.2 Валидация path и SSRF-защита
+---
 
-- Пользовательский `path` URL-декодируется перед валидацией, затем проверяется на отсутствие path traversal (`..`) и абсолютных URL (`://`). При нарушении — отклонить с HTTP 422.
-- Итоговый URL (после конкатенации base_url + path) проходит SSRF-валидацию: проверка scheme, запрет приватных IP, проверка совпадения hostname с base_url провайдера (см. §3.3 п.d).
+## §5. Security
 
-### §5.3 Фильтрация заголовков (Header Injection защита)
+### §5.1 Authentication and API Keys
 
-Пользовательские заголовки из поля `headers` запроса фильтруются через **allowlist** (а не blocklist). Допустимые пользовательские заголовки:
+- All endpoints require HTTP Basic Auth via the `get_current_user` dependency.
+- The provider API key is NEVER returned to the client in the response. It is used only for building the request to the external API.
+- The API key header (`x-portkey-api-key`) cannot be overwritten by user-supplied headers from the `headers` request field.
+
+### §5.2 Path Validation and SSRF Protection
+
+- The user-supplied `path` is URL-decoded before validation, then checked for the absence of path traversal (`..`) and absolute URLs (`://`). On violation — reject with HTTP 422.
+- The final URL (after base_url + path concatenation) undergoes SSRF validation: scheme check, private IP prohibition, hostname match with the provider's base_url (see §3.3 step d).
+
+### §5.3 Header Filtering (Header Injection Protection)
+
+User-supplied headers from the `headers` request field are filtered via an **allowlist** (not a blocklist). Allowed user headers:
 - `Accept`
 - `Accept-Language`
 - `Accept-Encoding`
-- Заголовки с префиксом `X-Custom-`
+- Headers with prefix `X-Custom-`
 
-Все остальные заголовки отклоняются. В частности, ЗАПРЕЩЕНЫ hop-by-hop заголовки: `Connection`, `Transfer-Encoding`, `Host`, `Proxy-Authorization`, `Upgrade`, `Keep-Alive`, `TE`, `Trailer`. Это предотвращает HTTP request smuggling.
+All other headers are rejected. In particular, hop-by-hop headers are PROHIBITED: `Connection`, `Transfer-Encoding`, `Host`, `Proxy-Authorization`, `Upgrade`, `Keep-Alive`, `TE`, `Trailer`. This prevents HTTP request smuggling.
 
-### §5.4 Ограничение размеров
+### §5.4 Size Limits
 
-- Максимальный размер тела запроса (`body`) — 1 МБ (валидация на уровне Pydantic-схемы, см. `tester_spec.md` для schemas §1.2).
-- Максимальный размер ответа от провайдера — 10 МБ (валидация на уровне сервиса, см. `tester_service_spec.md` §1.2 п.10).
+- Maximum request body size (`body`) — 1 MB (validation at Pydantic schema level, see `tester_spec.md` for schemas §1.2).
+- Maximum provider response size — 10 MB (validation at service level, see `tester_service_spec.md` §1.2 step 10).
 
-### §5.5 Логирование (PII-защита)
+### §5.5 Logging (PII Protection)
 
-- Логирование `body` и `headers` запроса ЗАПРЕЩЕНО на уровне INFO и выше. Эти поля могут содержать PII (персональные данные пользователей, промпты).
-- На уровне INFO логируются ТОЛЬКО: `provider_name`, `method`, `path`, `status_code`.
-- На уровне DEBUG допускается логирование method и path, но НИКОГДА — body, headers или api_key.
+- Logging of request `body` and `headers` is PROHIBITED at INFO level and above. These fields may contain PII (user personal data, prompts).
+- At INFO level, ONLY the following are logged: `provider_name`, `method`, `path`, `status_code`.
+- At DEBUG level, logging of method and path is permitted, but NEVER body, headers, or api_key.

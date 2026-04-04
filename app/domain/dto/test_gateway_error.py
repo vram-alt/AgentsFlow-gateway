@@ -1,11 +1,11 @@
 """
-TDD Red-фаза: тесты для Pydantic-модели DTO GatewayError.
+TDD Red phase: тесты для Pydantic-модели DTO GatewayError.
 
 Тестируемая модель (из gateway_error.py):
   - GatewayError — frozen Pydantic V2 DTO для стандартизированного
     представления ошибки при взаимодействии с провайдером.
 
-Спецификация: gateway_error_spec.md
+Specification: gateway_error_spec.md
 
 Никаких внешних зависимостей кроме Pydantic — только чистая валидация.
 """
@@ -18,13 +18,13 @@ import pytest
 from pydantic import ValidationError
 
 # --------------------------------------------------------------------------
-# Импорт тестируемой модели (должен упасть на Red-фазе, т.к. gateway_error.py пуст)
+# Импорт тестируемой модели (должен упасть на Red-фазе, т.к. gateway_error.py is empty)
 # --------------------------------------------------------------------------
 from app.domain.dto.gateway_error import GatewayError
 
 
 # ==========================================================================
-# Фикстуры
+# Fixtures
 # ==========================================================================
 
 
@@ -36,7 +36,7 @@ def valid_trace_id() -> str:
 
 @pytest.fixture()
 def valid_gateway_error_data(valid_trace_id: str) -> dict:
-    """Минимальный набор обязательных полей для создания GatewayError."""
+    """Minimal set of required fields for creating GatewayError."""
     return {
         "trace_id": valid_trace_id,
         "error_code": "TIMEOUT",
@@ -46,7 +46,7 @@ def valid_gateway_error_data(valid_trace_id: str) -> dict:
 
 @pytest.fixture()
 def full_gateway_error_data(valid_trace_id: str) -> dict:
-    """Полный набор полей, включая опциональные."""
+    """Full set of fields, including опциональные."""
     return {
         "trace_id": valid_trace_id,
         "error_code": "PROVIDER_ERROR",
@@ -63,17 +63,17 @@ def full_gateway_error_data(valid_trace_id: str) -> dict:
 
 
 class TestGatewayErrorCreation:
-    """Тесты создания GatewayError с валидными данными."""
+    """Тесты создания GatewayError with valid data."""
 
     def test_valid_minimal_creation(self, valid_gateway_error_data: dict) -> None:
-        """Создание с минимальным набором обязательных полей проходит без ошибок."""
+        """Creation of с минимальным набором обязательных полей проходит без ошибок."""
         error = GatewayError(**valid_gateway_error_data)
         assert error.trace_id == valid_gateway_error_data["trace_id"]
         assert error.error_code == "TIMEOUT"
         assert error.message == "Превышен таймаут ожидания ответа от провайдера"
 
     def test_valid_full_creation(self, full_gateway_error_data: dict) -> None:
-        """Создание с полным набором полей проходит без ошибок."""
+        """Creation of с полным набором полей проходит без ошибок."""
         error = GatewayError(**full_gateway_error_data)
         assert error.trace_id == full_gateway_error_data["trace_id"]
         assert error.error_code == "PROVIDER_ERROR"
@@ -108,7 +108,7 @@ class TestGatewayErrorDefaults:
     def test_provider_name_defaults_to_none(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """provider_name по умолчанию None."""
+        """provider_name defaults to None."""
         error = GatewayError(**valid_gateway_error_data)
         assert error.provider_name is None
 
@@ -186,21 +186,21 @@ class TestGatewayErrorTraceIdValidation:
     """Тесты валидации поля trace_id."""
 
     def test_trace_id_required(self) -> None:
-        """trace_id — обязательное поле; без него ValidationError."""
+        """trace_id — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             GatewayError(error_code="TIMEOUT", message="Timeout")
 
     def test_trace_id_empty_string_rejected(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Пустая строка trace_id отклоняется."""
+        """Empty string trace_id is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "trace_id": ""})
 
     def test_trace_id_invalid_uuid_rejected(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Невалидный UUID отклоняется."""
+        """Невалидный UUID is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "trace_id": "not-a-uuid"})
 
@@ -216,7 +216,7 @@ class TestGatewayErrorTraceIdValidation:
     def test_trace_id_valid_uuid_v4_accepted(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Валидный UUID v4 принимается."""
+        """Валидный UUID v4 acceptsся."""
         valid_uuid = str(uuid.uuid4())
         error = GatewayError(**{**valid_gateway_error_data, "trace_id": valid_uuid})
         assert error.trace_id == valid_uuid
@@ -231,14 +231,14 @@ class TestGatewayErrorCodeValidation:
     """Тесты валидации поля error_code."""
 
     def test_error_code_required(self, valid_trace_id: str) -> None:
-        """error_code — обязательное поле; без него ValidationError."""
+        """error_code — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             GatewayError(trace_id=valid_trace_id, message="Some error")
 
     def test_error_code_empty_string_rejected(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Пустая строка error_code отклоняется."""
+        """Empty string error_code is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "error_code": ""})
 
@@ -277,19 +277,19 @@ class TestGatewayErrorMessageValidation:
     """Тесты валидации поля message."""
 
     def test_message_required(self, valid_trace_id: str) -> None:
-        """message — обязательное поле; без него ValidationError."""
+        """message — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             GatewayError(trace_id=valid_trace_id, error_code="TIMEOUT")
 
     def test_message_empty_string_rejected(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Пустая строка message отклоняется."""
+        """Empty string message is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "message": ""})
 
     def test_message_accepts_long_text(self, valid_gateway_error_data: dict) -> None:
-        """Длинное сообщение принимается."""
+        """Длинное сообщение acceptsся."""
         long_message = "Ошибка " * 500
         error = GatewayError(**{**valid_gateway_error_data, "message": long_message})
         assert error.message == long_message
@@ -304,23 +304,23 @@ class TestGatewayErrorStatusCodeValidation:
     """Тесты валидации поля status_code."""
 
     def test_status_code_400_accepted(self, valid_gateway_error_data: dict) -> None:
-        """Нижняя граница диапазона [400, 599] — 400 принимается."""
+        """Нижняя граница диапазона [400, 599] — 400 acceptsся."""
         error = GatewayError(**{**valid_gateway_error_data, "status_code": 400})
         assert error.status_code == 400
 
     def test_status_code_599_accepted(self, valid_gateway_error_data: dict) -> None:
-        """Верхняя граница диапазона [400, 599] — 599 принимается."""
+        """Верхняя граница диапазона [400, 599] — 599 acceptsся."""
         error = GatewayError(**{**valid_gateway_error_data, "status_code": 599})
         assert error.status_code == 599
 
     def test_status_code_500_accepted(self, valid_gateway_error_data: dict) -> None:
-        """Типичный серверный код 500 принимается."""
+        """Типичный серверный код 500 acceptsся."""
         error = GatewayError(**{**valid_gateway_error_data, "status_code": 500})
         assert error.status_code == 500
 
     def test_status_code_399_rejected(self, valid_gateway_error_data: dict) -> None:
         """
-        [SRE_MARKER] — status_code < 400 отклоняется.
+        [SRE_MARKER] — status_code < 400 is rejected.
         Коды 2xx/3xx не являются ошибками и не должны попадать в GatewayError.
         """
         with pytest.raises(ValidationError):
@@ -335,19 +335,19 @@ class TestGatewayErrorStatusCodeValidation:
             GatewayError(**{**valid_gateway_error_data, "status_code": 200})
 
     def test_status_code_600_rejected(self, valid_gateway_error_data: dict) -> None:
-        """status_code > 599 отклоняется (нет таких HTTP-кодов)."""
+        """status_code > 599 is rejected (нет таких HTTP-кодов)."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "status_code": 600})
 
     def test_status_code_0_rejected(self, valid_gateway_error_data: dict) -> None:
-        """status_code = 0 отклоняется."""
+        """status_code = 0 is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "status_code": 0})
 
     def test_status_code_negative_rejected(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Отрицательный status_code отклоняется."""
+        """Отрицательный status_code is rejected."""
         with pytest.raises(ValidationError):
             GatewayError(**{**valid_gateway_error_data, "status_code": -1})
 
@@ -384,14 +384,14 @@ class TestGatewayErrorProviderNameValidation:
     def test_provider_name_string_accepted(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """provider_name как строка принимается."""
+        """provider_name как строка acceptsся."""
         error = GatewayError(**{**valid_gateway_error_data, "provider_name": "portkey"})
         assert error.provider_name == "portkey"
 
     def test_provider_name_omitted_defaults_to_none(
         self, valid_gateway_error_data: dict
     ) -> None:
-        """Если provider_name не передан, по умолчанию None."""
+        """If provider_name не передан, defaults to None."""
         error = GatewayError(**valid_gateway_error_data)
         assert error.provider_name is None
 
@@ -405,20 +405,20 @@ class TestGatewayErrorDetailsValidation:
     """Тесты валидации поля details."""
 
     def test_details_accepts_dict(self, valid_gateway_error_data: dict) -> None:
-        """details принимает словарь."""
+        """details accepts словарь."""
         error = GatewayError(
             **{**valid_gateway_error_data, "details": {"key": "value"}}
         )
         assert error.details == {"key": "value"}
 
     def test_details_accepts_nested_dict(self, valid_gateway_error_data: dict) -> None:
-        """details принимает вложенный словарь."""
+        """details accepts вложенный словарь."""
         nested = {"level1": {"level2": {"level3": "deep"}}}
         error = GatewayError(**{**valid_gateway_error_data, "details": nested})
         assert error.details == nested
 
     def test_details_accepts_empty_dict(self, valid_gateway_error_data: dict) -> None:
-        """details принимает пустой словарь."""
+        """details accepts пустой словарь."""
         error = GatewayError(**{**valid_gateway_error_data, "details": {}})
         assert error.details == {}
 
@@ -497,7 +497,7 @@ class TestGatewayErrorSerialization:
     """Тесты сериализации модели."""
 
     def test_model_dump_returns_dict(self, full_gateway_error_data: dict) -> None:
-        """model_dump() возвращает словарь со всеми полями."""
+        """model_dump() возвращает словарь with all fields."""
         error = GatewayError(**full_gateway_error_data)
         data = error.model_dump()
         assert isinstance(data, dict)
@@ -509,7 +509,7 @@ class TestGatewayErrorSerialization:
         assert "details" in data
 
     def test_model_dump_values_match(self, full_gateway_error_data: dict) -> None:
-        """model_dump() возвращает корректные значения."""
+        """model_dump() возвращает корректные values."""
         error = GatewayError(**full_gateway_error_data)
         data = error.model_dump()
         assert data["trace_id"] == full_gateway_error_data["trace_id"]
@@ -541,7 +541,7 @@ class TestGatewayErrorMissingRequiredFields:
     """Тесты на отсутствие обязательных полей."""
 
     def test_missing_all_fields(self) -> None:
-        """Без обязательных полей — ValidationError."""
+        """Without required fields — ValidationError."""
         with pytest.raises(ValidationError):
             GatewayError()
 

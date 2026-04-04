@@ -1,7 +1,7 @@
 """
-Общие фикстуры для тестов роутера провайдеров (providers).
+Shared fixtures for provider router tests (providers).
 
-Извлечены из app/api/routes/test_providers.py при рефакторинге.
+Extracted from app/api/routes/test_providers.py during refactoring.
 """
 
 import uuid
@@ -18,14 +18,14 @@ from app.domain.dto.gateway_error import GatewayError
 
 
 # ─────────────────────────────────────────────────────────
-# Хелперы
+# Helpers
 # ─────────────────────────────────────────────────────────
 
 FAKE_TRACE_ID = str(uuid.uuid4())
 
 
 def _make_gateway_error(status_code: int, error_code: str, message: str) -> MagicMock:
-    """Создать мок GatewayError с заданным статусом."""
+    """Create a mock GatewayError with the given status."""
     err = MagicMock(spec=GatewayError)
     err.status_code = status_code
     err.trace_id = FAKE_TRACE_ID
@@ -42,7 +42,7 @@ def _make_fake_provider(
     base_url: str = "https://api.openai.com/v1",
     is_active: bool = True,
 ) -> dict:
-    """Фейковый провайдер как словарь (имитация сериализованной сущности)."""
+    """Fake provider as a dict (simulating a serialized entity)."""
     return {
         "id": provider_id,
         "name": name,
@@ -55,13 +55,13 @@ def _make_fake_provider(
 
 
 # ─────────────────────────────────────────────────────────
-# Фикстуры
+# Fixtures
 # ─────────────────────────────────────────────────────────
 
 
 @pytest.fixture()
 def mock_provider_service() -> MagicMock:
-    """Мок ProviderService — все методы возвращают AsyncMock."""
+    """Mock ProviderService — all methods return AsyncMock."""
     service = MagicMock()
     service.list_providers = AsyncMock(return_value=[])
     service.create_provider = AsyncMock(return_value=_make_fake_provider())
@@ -73,8 +73,8 @@ def mock_provider_service() -> MagicMock:
 @pytest.fixture()
 def client(mock_provider_service: MagicMock) -> TestClient:
     """
-    TestClient с подменённым ProviderService через dependency_overrides.
-    HTTP Basic Auth отключён для изоляции тестов роутинга.
+    TestClient with ProviderService substituted via dependency_overrides.
+    HTTP Basic Auth disabled for routing test isolation.
     """
     app = FastAPI()
     app.include_router(providers_router)

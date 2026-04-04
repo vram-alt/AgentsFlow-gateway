@@ -1,7 +1,7 @@
 """
 Тесты для ORM-моделей SQLAlchemy (models.py).
 
-Спецификация: models_spec.md
+Specification: models_spec.md
 Проверяет:
   - Наличие всех таблиц (providers, policies, logs)
   - Типы и ограничения колонок

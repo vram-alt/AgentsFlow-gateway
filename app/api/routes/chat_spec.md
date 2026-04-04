@@ -1,84 +1,84 @@
-# Спецификация: Роутер чата (chat.py)
+# Specification: Chat Router (chat.py)
 
-> **Файл реализации:** `chat.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** HTTP-обработчик для отправки промптов к LLM через шлюз (Режим А)
-
----
-
-## 1. Общие правила
-
-- Роут — тонкая обёртка: принимает HTTP-запрос, вызывает сервис, возвращает HTTP-ответ.
-- Бизнес-логика **запрещена** в роуте — только маршрутизация и трансформация.
-- Все зависимости получаются через FastAPI Depends.
-- Pydantic-схемы для request/response определяются в этом файле.
+> **Implementation file:** `chat.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** HTTP handler for sending prompts to the LLM via the gateway (Mode A)
 
 ---
 
-## 2. Роутер
+## 1. General Rules
 
-**Префикс:** `/api/chat`  
-**Теги:** "Chat"
+- The route is a thin wrapper: accepts an HTTP request, calls the service, returns an HTTP response.
+- Business logic is **prohibited** in the route — only routing and transformation.
+- All dependencies are obtained via FastAPI Depends.
+- Pydantic schemas for request/response are defined in this file.
 
 ---
 
-## 3. Эндпоинт: POST /api/chat/send
+## 2. Router
 
-### Назначение
+**Prefix:** `/api/chat`  
+**Tags:** "Chat"
 
-Отправка промпта к LLM через шлюз (Режим А).
+---
 
-### Request Body (схема ChatRequest)
+## 3. Endpoint: POST /api/chat/send
 
-| Поле             | Тип                                    | Обязательное | По умолчанию  | Описание                    |
-|------------------|----------------------------------------|--------------|---------------|-----------------------------|
-| `model`          | строка                                 | Да           | —             | ID модели LLM               |
-| `messages`       | список MessageItem                     | Да           | —             | Список сообщений диалога     |
-| `provider_name`  | строка                                 | Нет          | "portkey"     | Имя провайдера               |
-| `temperature`    | число с плавающей точкой или null      | Нет          | null          | Температура генерации        |
-| `max_tokens`     | целое число или null                   | Нет          | null          | Макс. количество токенов     |
-| `guardrail_ids`  | список строк                           | Нет          | пустой список | ID политик Guardrail         |
+### Purpose
 
-### Пошаговая логика
+Send a prompt to the LLM via the gateway (Mode A).
 
-1. Валидировать входящий JSON через Pydantic (автоматически).
-2. Вызвать chat_service.send_chat_message(...).
-3. Если результат — UnifiedResponse → вернуть HTTP 200 с телом ответа.
-4. Если результат — GatewayError → вернуть HTTP с соответствующим status_code.
-5. Логирование делегировать в BackgroundTasks.
+### Request Body (ChatRequest schema)
 
-### Response (HTTP 200, схема ChatResponse)
+| Field            | Type                                   | Required | Default       | Description                 |
+|------------------|----------------------------------------|----------|---------------|-----------------------------|
+| `model`          | string                                 | Yes      | —             | LLM model ID               |
+| `messages`       | list of MessageItem                    | Yes      | —             | List of conversation messages|
+| `provider_name`  | string                                 | No       | "portkey"     | Provider name               |
+| `temperature`    | float or null                          | No       | null          | Generation temperature      |
+| `max_tokens`     | integer or null                        | No       | null          | Max token count             |
+| `guardrail_ids`  | list of strings                        | No       | empty list    | Guardrail policy IDs        |
 
-| Поле                | Тип                    | Описание                          |
+### Step-by-Step Logic
+
+1. Validate incoming JSON via Pydantic (automatic).
+2. Call chat_service.send_chat_message(...).
+3. If result is UnifiedResponse → return HTTP 200 with response body.
+4. If result is GatewayError → return HTTP with corresponding status_code.
+5. Delegate logging to BackgroundTasks.
+
+### Response (HTTP 200, ChatResponse schema)
+
+| Field               | Type                   | Description                       |
 |---------------------|------------------------|-----------------------------------|
-| `trace_id`          | строка                 | UUID сквозного идентификатора     |
-| `content`           | строка                 | Текст ответа модели               |
-| `model`             | строка                 | Фактическая модель, ответившая    |
-| `usage`             | UsageInfo или null     | Статистика использования токенов  |
-| `guardrail_blocked` | булево                 | Был ли запрос заблокирован        |
+| `trace_id`          | string                 | Correlation UUID                  |
+| `content`           | string                 | Model response text               |
+| `model`             | string                 | Actual model that responded       |
+| `usage`             | UsageInfo or null      | Token usage statistics            |
+| `guardrail_blocked` | boolean                | Whether the request was blocked   |
 
-### Response (HTTP 4xx/5xx, схема ErrorResponse)
+### Response (HTTP 4xx/5xx, ErrorResponse schema)
 
-| Поле         | Тип     | Описание                              |
+| Field        | Type    | Description                           |
 |--------------|---------|---------------------------------------|
-| `trace_id`   | строка  | UUID сквозного идентификатора         |
-| `error_code` | строка  | Код ошибки (например, "TIMEOUT")      |
-| `message`    | строка  | Человекочитаемое описание ошибки      |
-| `details`    | словарь | Дополнительные данные (по умолчанию пустой) |
+| `trace_id`   | string  | Correlation UUID                      |
+| `error_code` | string  | Error code (e.g., "TIMEOUT")          |
+| `message`    | string  | Human-readable error description      |
+| `details`    | dict    | Additional data (default empty)       |
 
-### Защита
+### Protection
 
-HTTP Basic Auth (через Depends).
+HTTP Basic Auth (via Depends).
 
 ---
 
-## 4. Обработка ошибок
+## 4. Error Handling
 
-| HTTP-статус | Когда                                    |
+| HTTP Status | When                                     |
 |-------------|------------------------------------------|
-| 200         | Успешная отправка и получение ответа     |
-| 401         | Невалидный токен / не авторизован        |
-| 422         | Невалидный JSON (Pydantic)               |
-| 500         | Внутренняя ошибка сервера                |
-| 502         | Ошибка провайдера                        |
-| 504         | Таймаут провайдера                       |
+| 200         | Successful submission and response       |
+| 401         | Invalid token / unauthorized             |
+| 422         | Invalid JSON (Pydantic)                  |
+| 500         | Internal server error                    |
+| 502         | Provider error                           |
+| 504         | Provider timeout                         |

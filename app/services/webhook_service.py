@@ -1,4 +1,4 @@
-"""WebhookService — обработка входящих webhook-отчётов от провайдеров."""
+"""WebhookService — processing incoming webhook reports from providers."""
 
 from __future__ import annotations
 
@@ -17,7 +17,7 @@ _UUID_V4_RE = re.compile(
 
 
 class WebhookService:
-    """Сервис обработки входящих webhook-отчётов об инцидентах безопасности."""
+    """Service for processing incoming webhook reports about security incidents."""
 
     def __init__(self, log_service: LogService, log_repo: LogRepository) -> None:
         """[YEL-1] Concrete types instead of Any for dependency injection."""
@@ -27,13 +27,13 @@ class WebhookService:
     async def process_guardrail_incident(
         self, payload: dict[str, Any] | None
     ) -> dict[str, Any]:
-        """Обработка входящего webhook-отчёта о срабатывании Guardrail."""
+        """Process an incoming webhook report about a Guardrail trigger."""
 
-        # §5: Пустой или None payload → rejected
+        # §5: Empty or None payload → rejected
         if not payload:
             return {"status": "rejected", "reason": "empty payload"}
 
-        # §4 шаг 1: Извлечение trace_id
+        # §4 step 1: Extract trace_id
         trace_id_source = "webhook"
         trace_id = payload.get("trace_id")
 
@@ -45,11 +45,11 @@ class WebhookService:
             trace_id = str(uuid.uuid4())
             trace_id_source = "generated"
 
-        # §4 шаг 2: Валидация формата trace_id
+        # §4 step 2: Validate trace_id format
         if not _UUID_V4_RE.match(trace_id):
             logging.warning("Invalid trace_id format: %s", trace_id)
 
-        # §4 шаг 3: Проверка связи с исходным запросом
+        # §4 step 3: Check linkage to original request
         try:
             existing_logs = await self.log_repo.get_by_trace_id(trace_id)
             linked_to_prompt = any(
@@ -60,7 +60,7 @@ class WebhookService:
             logging.error("DB read error during trace lookup: %s", exc)
             return {"status": "error"}
 
-        # §4 шаг 4: Формирование записи инцидента
+        # §4 step 4: Build incident record
         incident_payload: dict[str, Any] = {
             "original_webhook_body": payload,
             "trace_id_source": trace_id_source,
@@ -68,14 +68,14 @@ class WebhookService:
             "processed_at": datetime.now(timezone.utc).isoformat(),
         }
 
-        # §4 шаг 5: Запись в журнал
+        # §4 step 5: Write to audit log
         try:
             await self.log_service.log_guardrail_incident(trace_id, incident_payload)
         except Exception as exc:
             logging.error("DB write error during incident logging: %s", exc)
             return {"status": "error"}
 
-        # §4 шаг 6: Возврат подтверждения
+        # §4 step 6: Return confirmation
         return {
             "status": "accepted",
             "trace_id": trace_id,

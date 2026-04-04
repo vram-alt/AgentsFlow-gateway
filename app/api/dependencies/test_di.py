@@ -1,7 +1,7 @@
 """
 Тесты для модуля DI (Dependency Injection) — app/api/dependencies/di.py
 
-Спецификация: app/api/dependencies/dependencies_spec.md
+Specification: app/api/dependencies/dependencies_spec.md
 Фаза: TDD Red — тесты ДОЛЖНЫ падать до реализации.
 
 Проверяемые контракты:
@@ -38,7 +38,7 @@ from app.domain.contracts.gateway_provider import GatewayProvider
 
 
 # ======================================================================
-# Фикстуры
+# Fixtures
 # ======================================================================
 
 
@@ -58,7 +58,7 @@ def mock_async_session() -> AsyncMock:
 
 
 class TestGetProviderRepo:
-    """Тесты для фабрики get_provider_repo (§2.1 спеки)."""
+    """Tests for фабрики get_provider_repo (§2.1 спеки)."""
 
     def test_get_provider_repo_exists_in_module(self) -> None:
         """Функция get_provider_repo должна быть экспортирована из di.py."""
@@ -86,7 +86,7 @@ class TestGetProviderRepo:
 
 
 class TestGetPolicyRepo:
-    """Тесты для фабрики get_policy_repo (§2.2 спеки)."""
+    """Tests for фабрики get_policy_repo (§2.2 спеки)."""
 
     def test_get_policy_repo_exists_in_module(self) -> None:
         """Функция get_policy_repo должна быть экспортирована из di.py."""
@@ -114,7 +114,7 @@ class TestGetPolicyRepo:
 
 
 class TestGetLogRepo:
-    """Тесты для фабрики get_log_repo (§2.3 спеки)."""
+    """Tests for фабрики get_log_repo (§2.3 спеки)."""
 
     def test_get_log_repo_exists_in_module(self) -> None:
         """Функция get_log_repo должна быть экспортирована из di.py."""
@@ -140,7 +140,7 @@ class TestGetLogRepo:
 
 
 class TestGetAdapter:
-    """Тесты для фабрики get_adapter (§2.4 спеки)."""
+    """Tests for фабрики get_adapter (§2.4 спеки)."""
 
     def test_get_adapter_exists_in_module(self) -> None:
         """Функция get_adapter должна быть экспортирована из di.py."""
@@ -178,7 +178,7 @@ class TestGetAdapter:
 
 
 class TestGetLogService:
-    """Тесты для фабрики get_log_service (§2.5 спеки)."""
+    """Tests for фабрики get_log_service (§2.5 спеки)."""
 
     def test_get_log_service_returns_log_service_instance(
         self, mock_async_session: AsyncMock
@@ -189,7 +189,7 @@ class TestGetLogService:
         """
         mock_log_repo = MagicMock(spec=LogRepository)
         service = LogService(log_repo=mock_log_repo)
-        # Проверяем, что LogService принимает log_repo и создаётся корректно
+        # Проверяем, что LogService accepts log_repo и создаётся корректно
         assert isinstance(service, LogService)
 
     def test_get_log_service_callable_returns_correct_type(self) -> None:
@@ -197,7 +197,7 @@ class TestGetLogService:
 
         Текущий скаффолдинг бросает NotImplementedError — тест должен упасть.
         """
-        # Фабрика в спеке принимает log_repo через Depends(get_log_repo)
+        # Фабрика в спеке accepts log_repo через Depends(get_log_repo)
         # В реализации FastAPI разрешит зависимости автоматически.
         # Здесь мы проверяем, что функция не бросает NotImplementedError
         # и возвращает корректный тип.
@@ -206,7 +206,7 @@ class TestGetLogService:
         except NotImplementedError:
             pytest.fail(
                 "get_log_service() бросает NotImplementedError — "
-                "фабрика не реализована (ожидается LogService)"
+                "фабрика is not implementedа (ожидается LogService)"
             )
         assert isinstance(result, LogService), (
             f"Ожидался LogService, получен {type(result).__name__}"
@@ -219,7 +219,7 @@ class TestGetLogService:
 
 
 class TestGetChatService:
-    """Тесты для фабрики get_chat_service (§2.6 спеки)."""
+    """Tests for фабрики get_chat_service (§2.6 спеки)."""
 
     def test_get_chat_service_callable_returns_correct_type(self) -> None:
         """get_chat_service() должен вернуть экземпляр ChatService.
@@ -231,7 +231,7 @@ class TestGetChatService:
         except NotImplementedError:
             pytest.fail(
                 "get_chat_service() бросает NotImplementedError — "
-                "фабрика не реализована (ожидается ChatService)"
+                "фабрика is not implementedа (ожидается ChatService)"
             )
         assert isinstance(result, ChatService), (
             f"Ожидался ChatService, получен {type(result).__name__}"
@@ -242,7 +242,7 @@ class TestGetChatService:
         try:
             service = get_chat_service()
         except NotImplementedError:
-            pytest.fail("get_chat_service() не реализован")
+            pytest.fail("get_chat_service() is not implemented")
 
         assert hasattr(service, "provider_repo"), (
             "ChatService должен иметь provider_repo"
@@ -261,7 +261,7 @@ class TestGetChatService:
 
 
 class TestGetPolicyService:
-    """Тесты для фабрики get_policy_service (§2.7 спеки)."""
+    """Tests for фабрики get_policy_service (§2.7 спеки)."""
 
     def test_get_policy_service_callable_returns_correct_type(self) -> None:
         """get_policy_service() должен вернуть экземпляр PolicyService.
@@ -273,7 +273,7 @@ class TestGetPolicyService:
         except NotImplementedError:
             pytest.fail(
                 "get_policy_service() бросает NotImplementedError — "
-                "фабрика не реализована (ожидается PolicyService)"
+                "фабрика is not implementedа (ожидается PolicyService)"
             )
         assert isinstance(result, PolicyService), (
             f"Ожидался PolicyService, получен {type(result).__name__}"
@@ -284,7 +284,7 @@ class TestGetPolicyService:
         try:
             service = get_policy_service()
         except NotImplementedError:
-            pytest.fail("get_policy_service() не реализован")
+            pytest.fail("get_policy_service() is not implemented")
 
         assert hasattr(service, "policy_repo"), "PolicyService должен иметь policy_repo"
         assert hasattr(service, "provider_repo"), (
@@ -305,7 +305,7 @@ class TestGetPolicyService:
 
 
 class TestGetWebhookService:
-    """Тесты для фабрики get_webhook_service (§2.8 спеки)."""
+    """Tests for фабрики get_webhook_service (§2.8 спеки)."""
 
     def test_get_webhook_service_callable_returns_correct_type(self) -> None:
         """get_webhook_service() должен вернуть экземпляр WebhookService.
@@ -317,7 +317,7 @@ class TestGetWebhookService:
         except NotImplementedError:
             pytest.fail(
                 "get_webhook_service() бросает NotImplementedError — "
-                "фабрика не реализована (ожидается WebhookService)"
+                "фабрика is not implementedа (ожидается WebhookService)"
             )
         assert isinstance(result, WebhookService), (
             f"Ожидался WebhookService, получен {type(result).__name__}"
@@ -328,7 +328,7 @@ class TestGetWebhookService:
         try:
             service = get_webhook_service()
         except NotImplementedError:
-            pytest.fail("get_webhook_service() не реализован")
+            pytest.fail("get_webhook_service() is not implemented")
 
         assert hasattr(service, "log_service"), (
             "WebhookService должен иметь log_service"
@@ -356,7 +356,7 @@ class TestDependencyGraph:
             chat_svc = get_chat_service()
             policy_svc = get_policy_service()
         except NotImplementedError:
-            pytest.fail("Фабрики сервисов не реализованы")
+            pytest.fail("Фабрики сервисов is not implementedы")
 
         assert chat_svc.adapter is policy_svc.adapter, (
             "ChatService и PolicyService должны разделять один экземпляр адаптера"
@@ -377,7 +377,7 @@ class TestSREConfigurationErrors:
     """
 
     def test_missing_database_url_raises_configuration_error(self) -> None:
-        """Если DATABASE_URL не задан или пуст, DI должен бросить ConfigurationError.
+        """If DATABASE_URL не задан или пуст, DI должен бросить ConfigurationError.
 
         [SRE_MARKER]: Критичная переменная окружения отсутствует →
         приложение не должно стартовать молча.
@@ -462,7 +462,7 @@ class TestSREConfigurationErrors:
         except NotImplementedError:
             pytest.fail(
                 "get_provider_service() бросает NotImplementedError — "
-                "фабрика не реализована"
+                "фабрика is not implementedа"
             )
         assert result is not None, "get_provider_service() вернул None"
 
@@ -497,7 +497,7 @@ class TestFactoriesNeverReturnNone:
         try:
             result = factory_fn()
         except NotImplementedError:
-            pytest.fail(f"{factory_name}() бросает NotImplementedError — не реализован")
+            pytest.fail(f"{factory_name}() бросает NotImplementedError — is not implemented")
         assert result is not None, f"{factory_name}() вернул None — сервис не создан"
 
 
@@ -507,7 +507,7 @@ class TestFactoriesNeverReturnNone:
 
 
 class TestGetTesterService:
-    """Тесты для новой фабрики get_tester_service (upgrade spec §1)."""
+    """Tests for новой фабрики get_tester_service (upgrade spec §1)."""
 
     def test_get_tester_service_exists_in_module(self) -> None:
         """Функция get_tester_service должна быть экспортирована из di.py."""
@@ -527,7 +527,7 @@ class TestGetTesterService:
         except NotImplementedError:
             pytest.fail(
                 "get_tester_service() бросает NotImplementedError — "
-                "фабрика не реализована (ожидается TesterService)"
+                "фабрика is not implementedа (ожидается TesterService)"
             )
         assert isinstance(result, TesterService), (
             f"Ожидался TesterService, получен {type(result).__name__}"
@@ -540,7 +540,7 @@ class TestGetTesterService:
         try:
             service = get_tester_service()
         except NotImplementedError:
-            pytest.fail("get_tester_service() не реализован")
+            pytest.fail("get_tester_service() is not implemented")
 
         assert hasattr(service, "provider_repo"), (
             "TesterService должен иметь provider_repo"
@@ -554,7 +554,7 @@ class TestGetTesterService:
         try:
             service = get_tester_service()
         except NotImplementedError:
-            pytest.fail("get_tester_service() не реализован")
+            pytest.fail("get_tester_service() is not implemented")
 
         assert hasattr(service, "http_client"), (
             "TesterService должен иметь http_client"
@@ -567,7 +567,7 @@ class TestGetTesterService:
 
 
 class TestGetHttpClient:
-    """Тесты для новой фабрики get_http_client (upgrade spec §3).
+    """Tests for новой фабрики get_http_client (upgrade spec §3).
 
     [SRE_MARKER] Если адаптер не инициализирован (None) → HTTP 503.
     """
@@ -617,7 +617,7 @@ class TestGetHttpClient:
 
 
 class TestGetTesterHttpClient:
-    """Тесты для новой фабрики get_tester_http_client (upgrade spec §4).
+    """Tests for новой фабрики get_tester_http_client (upgrade spec §4).
 
     [SRE_MARKER] Изолированный HTTP-клиент для TesterService.
     """
@@ -653,7 +653,7 @@ class TestGetTesterHttpClient:
         from app.api.dependencies import di
 
         if not hasattr(di, "get_http_client") or not hasattr(di, "get_tester_http_client"):
-            pytest.skip("Фабрики ещё не реализованы")
+            pytest.skip("Фабрики ещё is not implementedы")
 
         try:
             main_client = di.get_http_client()

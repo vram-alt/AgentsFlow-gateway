@@ -24,12 +24,24 @@ from app.services.log_service import LogService
 logger = logging.getLogger(__name__)
 
 
+# Map error codes to appropriate HTTP status codes
+_ERROR_CODE_STATUS: dict[str, int] = {
+    "AUTH_FAILED": 424,  # Failed Dependency — provider not configured
+    "VALIDATION_ERROR": 404,  # Not Found — resource doesn't exist
+    "RATE_LIMITED": 429,  # Too Many Requests
+    "TIMEOUT": 504,  # Gateway Timeout
+    "PROVIDER_ERROR": 502,  # Bad Gateway — upstream provider error
+    "UNKNOWN": 500,  # Internal Server Error
+}
+
+
 def _make_error(error_code: str, message: str) -> GatewayError:
-    """Factory for creating GatewayError with automatic trace_id."""
+    """Factory for creating GatewayError with automatic trace_id and proper status_code."""
     return GatewayError(
         trace_id=str(uuid.uuid4()),
         error_code=error_code,
         message=message,
+        status_code=_ERROR_CODE_STATUS.get(error_code, 500),
     )
 
 
@@ -61,7 +73,10 @@ class PolicyService:
         # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
-            return _make_error("AUTH_FAILED", "Provider not found")
+            return _make_error(
+                "AUTH_FAILED",
+                f"Provider '{provider_name}' not found or inactive — add it in Configuration > Providers first",
+            )
 
         # 2. Send configuration to cloud
         cloud_result = await self.adapter.create_guardrail(
@@ -80,7 +95,7 @@ class PolicyService:
             )
         except Exception as exc:
             logger.error("Failed to save policy to DB: %s", exc)
-            return _make_error("UNKNOWN", "Database save error")
+            return _make_error("UNKNOWN", f"Failed to save policy to database: {exc}")
 
         # 4. Return domain entity
         return created
@@ -96,14 +111,20 @@ class PolicyService:
         # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
         if policy is None:
-            return _make_error("VALIDATION_ERROR", "Policy not found")
+            return _make_error(
+                "VALIDATION_ERROR",
+                f"Policy with ID {policy_id} not found — it may have been deleted",
+            )
 
         # 2. If body changed and remote_id exists — sync with cloud
         if body is not None and policy.remote_id:
             provider = await self.provider_repo.get_active_by_name("portkey")
             # [RED-2] Guard against None provider
             if provider is None:
-                return _make_error("AUTH_FAILED", "Provider not found")
+                return _make_error(
+                    "AUTH_FAILED",
+                    "Provider 'portkey' not found or inactive — add it in Configuration > Providers first",
+                )
             cloud_result = await self.adapter.update_guardrail(
                 policy.remote_id, body, provider.api_key, provider.base_url
             )
@@ -128,19 +149,27 @@ class PolicyService:
         # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
         if policy is None:
-            return _make_error("VALIDATION_ERROR", "Policy not found")
+            return _make_error(
+                "VALIDATION_ERROR",
+                f"Policy with ID {policy_id} not found — it may have been deleted",
+            )
 
-        # 2. If remote_id exists — delete in cloud
+        # 2. If remote_id exists — try to delete in cloud
         if policy.remote_id:
             provider = await self.provider_repo.get_active_by_name("portkey")
-            # [RED-2] Guard against None provider
             if provider is None:
-                return _make_error("AUTH_FAILED", "Provider not found")
-            cloud_result = await self.adapter.delete_guardrail(
-                policy.remote_id, provider.api_key, provider.base_url
-            )
-            if isinstance(cloud_result, GatewayError):
-                return cloud_result
+                # Provider not configured — skip cloud deletion, proceed with local soft-delete
+                logger.warning(
+                    "Provider 'portkey' not found during delete of policy %s — "
+                    "skipping cloud deletion, proceeding with local soft-delete",
+                    policy_id,
+                )
+            else:
+                cloud_result = await self.adapter.delete_guardrail(
+                    policy.remote_id, provider.api_key, provider.base_url
+                )
+                if isinstance(cloud_result, GatewayError):
+                    return cloud_result
 
         # 3. Soft delete in DB
         result = await self.policy_repo.soft_delete(policy_id)
@@ -149,9 +178,20 @@ class PolicyService:
         return result
 
     # ── 6. list_policies ─────────────────────────────────────────────
-    async def list_policies(self, only_active: bool = True) -> Sequence[PolicyModel]:
+    async def list_policies(self, only_active: bool = False) -> Sequence[PolicyModel]:
         """Get list of policies from DB."""
         return await self.policy_repo.list_all(only_active=only_active)
+
+    # ── 6b. toggle_policy ────────────────────────────────────────────
+    async def toggle_policy(self, policy_id: int) -> PolicyModel | GatewayError:
+        """Toggle is_active status of a policy."""
+        result = await self.policy_repo.toggle_active(policy_id)
+        if result is None:
+            return _make_error(
+                "VALIDATION_ERROR",
+                f"Policy with ID {policy_id} not found — it may have been deleted",
+            )
+        return result
 
     # ── 7. sync_policies_from_provider ───────────────────────────────
     async def sync_policies_from_provider(
@@ -161,7 +201,10 @@ class PolicyService:
         # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
-            return _make_error("AUTH_FAILED", "Provider not found")
+            return _make_error(
+                "AUTH_FAILED",
+                f"Provider '{provider_name}' not found or inactive — add it in Configuration > Providers first",
+            )
 
         # 2. Request policy list from cloud
         cloud_policies = await self.adapter.list_guardrails(

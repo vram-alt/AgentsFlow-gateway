@@ -1,10 +1,10 @@
 """
 TDD Red-phase тесты для Pydantic V2 схем модуля Testing Console.
 
-Спецификация: app/api/schemas/tester_spec.md
+Specification: app/api/schemas/tester_spec.md
 
-Все тесты ДОЛЖНЫ падать на Red-фазе, пока схемы не реализованы
-(tester.py пуст).
+Все тесты ДОЛЖНЫ падать на Red-фазе, until схемы is not implementedы
+(tester.py is empty).
 """
 
 from __future__ import annotations
@@ -56,7 +56,7 @@ class TestTesterProxyRequestBasic:
         assert req.headers is None
 
     def test_full_valid_request(self):
-        """Полный валидный запрос со всеми полями."""
+        """Полный валидный запрос with all fields."""
         req = TesterProxyRequest(
             provider_name="portkey",
             method="PUT",
@@ -87,7 +87,7 @@ class TestTesterProxyRequestBasic:
 
 
 class TestTesterProxyRequestMethod:
-    """Валидация поля method (§1)."""
+    """Validation of поля method (§1)."""
 
     @pytest.mark.parametrize("method", ["GET", "POST", "PUT", "DELETE"])
     def test_valid_methods_uppercase(self, method: str):
@@ -114,7 +114,7 @@ class TestTesterProxyRequestMethod:
             TesterProxyRequest(provider_name="portkey", method=method)
 
     def test_empty_method_rejected(self):
-        """Пустая строка method отклоняется."""
+        """Empty string method is rejected."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(provider_name="portkey", method="")
 
@@ -128,34 +128,34 @@ class TestTesterProxyRequestPathValidation:
     """[SRE_MARKER] Валидация path: SSRF, path traversal, абсолютные URL (§1.1)."""
 
     def test_valid_path_accepted(self):
-        """Обычный путь принимается."""
+        """Обычный путь acceptsся."""
         req = TesterProxyRequest(provider_name="portkey", path="/v1/chat/completions")
         assert req.path == "/v1/chat/completions"
 
     def test_path_traversal_rejected(self):
-        """[SRE_MARKER] Path traversal через '..' отклоняется."""
+        """[SRE_MARKER] Path traversal через '..' is rejected."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(provider_name="portkey", path="/../../etc/passwd")
 
     def test_path_traversal_double_dot_in_middle(self):
-        """[SRE_MARKER] '..' в середине пути отклоняется."""
+        """[SRE_MARKER] '..' в середине пути is rejected."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(provider_name="portkey", path="/v1/../admin/secrets")
 
     def test_absolute_url_rejected(self):
-        """[SRE_MARKER] Абсолютный URL (содержит '://') отклоняется."""
+        """[SRE_MARKER] Абсолютный URL (содержит '://') is rejected."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(provider_name="portkey", path="https://evil.com/steal")
 
     def test_percent_encoded_path_traversal_rejected(self):
-        """[SRE_MARKER] Percent-encoded path traversal (%2e%2e) отклоняется после URL-декодирования."""
+        """[SRE_MARKER] Percent-encoded path traversal (%2e%2e) is rejected после URL-декодирования."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(
                 provider_name="portkey", path="/%2e%2e/%2e%2e/etc/passwd"
             )
 
     def test_percent_encoded_absolute_url_rejected(self):
-        """[SRE_MARKER] Percent-encoded '://' (%3A%2F%2F) отклоняется после URL-декодирования."""
+        """[SRE_MARKER] Percent-encoded '://' (%3A%2F%2F) is rejected после URL-декодирования."""
         with pytest.raises(ValidationError):
             TesterProxyRequest(
                 provider_name="portkey", path="http%3A%2F%2Fevil.com/steal"
@@ -177,7 +177,7 @@ class TestTesterProxyRequestBodyValidation:
     """[SRE_MARKER] Ограничение размера body (§1.2)."""
 
     def test_small_body_accepted(self):
-        """Маленькое тело запроса принимается."""
+        """Маленькое тело запроса acceptsся."""
         req = TesterProxyRequest(
             provider_name="portkey",
             body={"model": "gpt-4", "messages": [{"role": "user", "content": "Hi"}]},
@@ -190,14 +190,14 @@ class TestTesterProxyRequestBodyValidation:
         assert req.body is None
 
     def test_body_exceeding_1mb_rejected(self):
-        """[SRE_MARKER] Тело > 1 МБ отклоняется с ошибкой 'Request body too large (max 1MB)'."""
+        """[SRE_MARKER] Тело > 1 МБ is rejected с ошибкой 'Request body too large (max 1MB)'."""
         # Создаём словарь, сериализация которого > 1 МБ
         large_body = {"data": "x" * (1_048_576 + 1)}
         with pytest.raises(ValidationError, match="Request body too large"):
             TesterProxyRequest(provider_name="portkey", body=large_body)
 
     def test_body_exactly_1mb_accepted(self):
-        """Тело ровно 1 МБ (или чуть меньше) принимается."""
+        """Тело ровно 1 МБ (или чуть меньше) acceptsся."""
         # Создаём строку, чтобы JSON-сериализация была < 1 МБ
         # {"data": "xxx..."} — overhead ~10 байт
         safe_size = 1_048_576 - 20
@@ -217,7 +217,7 @@ class TestTesterProxyRequestHeadersValidation:
     """[SRE_MARKER] Ограничение количества и длины headers (§1.3)."""
 
     def test_valid_headers_accepted(self):
-        """Допустимые заголовки принимаются."""
+        """Allowed headers принимаются."""
         req = TesterProxyRequest(
             provider_name="portkey",
             headers={"Accept": "application/json", "X-Custom-Id": "123"},
@@ -230,37 +230,37 @@ class TestTesterProxyRequestHeadersValidation:
         assert req.headers is None
 
     def test_too_many_headers_rejected(self):
-        """[SRE_MARKER] Более 20 заголовков отклоняется."""
+        """[SRE_MARKER] Более 20 заголовков is rejected."""
         headers = {f"X-Header-{i}": f"value-{i}" for i in range(21)}
         with pytest.raises(ValidationError, match="Too many headers"):
             TesterProxyRequest(provider_name="portkey", headers=headers)
 
     def test_exactly_20_headers_accepted(self):
-        """Ровно 20 заголовков принимается."""
+        """Ровно 20 заголовков acceptsся."""
         headers = {f"X-Header-{i}": f"value-{i}" for i in range(20)}
         req = TesterProxyRequest(provider_name="portkey", headers=headers)
         assert len(req.headers) == 20
 
     def test_header_name_too_long_rejected(self):
-        """[SRE_MARKER] Ключ заголовка > 128 символов отклоняется."""
+        """[SRE_MARKER] Ключ заголовка > 128 символов is rejected."""
         headers = {"X" * 129: "value"}
         with pytest.raises(ValidationError, match="Header name too long"):
             TesterProxyRequest(provider_name="portkey", headers=headers)
 
     def test_header_name_exactly_128_accepted(self):
-        """Ключ заголовка ровно 128 символов принимается."""
+        """Ключ заголовка ровно 128 символов acceptsся."""
         headers = {"X" * 128: "value"}
         req = TesterProxyRequest(provider_name="portkey", headers=headers)
         assert req.headers is not None
 
     def test_header_value_too_long_rejected(self):
-        """[SRE_MARKER] Значение заголовка > 4096 символов отклоняется."""
+        """[SRE_MARKER] Значение заголовка > 4096 символов is rejected."""
         headers = {"Accept": "v" * 4097}
         with pytest.raises(ValidationError, match="Header value too long"):
             TesterProxyRequest(provider_name="portkey", headers=headers)
 
     def test_header_value_exactly_4096_accepted(self):
-        """Значение заголовка ровно 4096 символов принимается."""
+        """Значение заголовка ровно 4096 символов acceptsся."""
         headers = {"Accept": "v" * 4096}
         req = TesterProxyRequest(provider_name="portkey", headers=headers)
         assert req.headers is not None

@@ -2,7 +2,7 @@
 Тесты для PUT /api/providers/{provider_id} — обновление провайдера.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md
+Specification: app/api/routes/providers_spec.md
 """
 
 import pytest
@@ -21,7 +21,7 @@ from app.api.routes.tests_providers.conftest import (
 
 
 class TestUpdateProvider:
-    """Тесты для PUT /api/providers/{provider_id} — обновление провайдера."""
+    """Tests for PUT /api/providers/{provider_id} — обновление a provider."""
 
     def test_update_provider_returns_200(
         self, client: TestClient, mock_provider_service: MagicMock
@@ -40,7 +40,7 @@ class TestUpdateProvider:
     def test_update_provider_with_api_key_only(
         self, client: TestClient, mock_provider_service: MagicMock
     ):
-        """Обновление только api_key — HTTP 200."""
+        """Update only api_key — HTTP 200."""
         mock_provider_service.update_provider.return_value = _make_fake_provider()
 
         payload = {"api_key": "sk-new-key-456"}
@@ -51,7 +51,7 @@ class TestUpdateProvider:
     def test_update_provider_with_base_url_only(
         self, client: TestClient, mock_provider_service: MagicMock
     ):
-        """Обновление только base_url — HTTP 200."""
+        """Update only base_url — HTTP 200."""
         mock_provider_service.update_provider.return_value = _make_fake_provider(
             base_url="https://new-api.openai.com/v2"
         )
@@ -113,7 +113,7 @@ class TestUpdateProvider:
     def test_update_provider_not_found_returns_404(
         self, client: TestClient, mock_provider_service: MagicMock
     ):
-        """Провайдер не найден — HTTP 404."""
+        """Provider not found — HTTP 404."""
         error = _make_gateway_error(404, "VALIDATION_ERROR", "Провайдер не найден")
         mock_provider_service.update_provider.return_value = error
 

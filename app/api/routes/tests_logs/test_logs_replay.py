@@ -2,7 +2,7 @@
 Тесты для POST /api/logs/{id}/replay — повтор запросов.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md (upgrade §3)
+Specification: app/api/routes/logs_spec.md (upgrade §3)
 """
 
 import pytest
@@ -20,7 +20,7 @@ from app.api.dependencies.di import get_log_service
 
 
 class TestPostLogsReplay:
-    """Тесты для нового эндпоинта POST /api/logs/{id}/replay (upgrade spec §3)."""
+    """Tests for нового эндпоинта POST /api/logs/{id}/replay (upgrade spec §3)."""
 
     @pytest.fixture()
     def replay_client(self, mock_log_service: MagicMock) -> TestClient:

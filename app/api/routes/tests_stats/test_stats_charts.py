@@ -2,7 +2,7 @@
 Тесты для GET /api/stats/charts — данные для графиков.
 
 Извлечены из app/api/routes/test_stats.py при рефакторинге.
-Спецификация: app/api/routes/stats_spec.md
+Specification: app/api/routes/stats_spec.md
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ class TestGetStatsChartsSuccess:
             assert isinstance(item["hour"], str)
 
     def test_default_hours_is_24(self, client: TestClient, mock_log_service: AsyncMock):
-        """По умолчанию hours=24 (spec 3.2)."""
+        """By default hours=24 (spec 3.2)."""
         client.get("/api/stats/charts")
         mock_log_service.get_chart_data.assert_called()
         call_kwargs = mock_log_service.get_chart_data.call_args
@@ -113,12 +113,12 @@ class TestGetStatsChartsValidation:
         assert response.status_code == 422
 
     def test_hours_1_accepted(self, client: TestClient, mock_log_service: AsyncMock):
-        """hours=1 принимается (граничное значение)."""
+        """hours=1 acceptsся (граничное значение)."""
         response = client.get("/api/stats/charts?hours=1")
         assert response.status_code == 200
 
     def test_hours_168_accepted(self, client: TestClient, mock_log_service: AsyncMock):
-        """hours=168 принимается (граничное значение)."""
+        """hours=168 acceptsся (граничное значение)."""
         response = client.get("/api/stats/charts?hours=168")
         assert response.status_code == 200
 
@@ -168,11 +168,11 @@ class TestStatsSecurityHoursLimit:
     """[SRE_MARKER] Параметр hours ограничен [1, 168] для предотвращения DoS."""
 
     def test_hours_1000_rejected(self, client: TestClient):
-        """[SRE_MARKER] hours=1000 отклоняется (> 168)."""
+        """[SRE_MARKER] hours=1000 is rejected (> 168)."""
         response = client.get("/api/stats/charts?hours=1000")
         assert response.status_code == 422
 
     def test_hours_999999_rejected(self, client: TestClient):
-        """[SRE_MARKER] hours=999999 отклоняется (чрезмерно широкий запрос)."""
+        """[SRE_MARKER] hours=999999 is rejected (чрезмерно широкий запрос)."""
         response = client.get("/api/stats/charts?hours=999999")
         assert response.status_code == 422

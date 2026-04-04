@@ -1,21 +1,21 @@
 # AI Gateway Adapter — Phase 3 POC
 
-Легковесный асинхронный API-шлюз с веб-интерфейсом.  
-Роль: интеллектуальный прокси между бизнес-логикой и LLM-провайдерами (Portkey).
+A lightweight asynchronous API gateway with a web interface.  
+Role: intelligent proxy between business logic and LLM providers (Portkey).
 
-## Архитектура
+## Architecture
 
-Проект построен по принципам **Clean Architecture** с паттерном **Adapter**:
+The project follows **Clean Architecture** principles with the **Adapter** pattern:
 
 ```
 app/
-├── domain/            # Чистые сущности, DTO, контракты (0 внешних зависимостей)
-├── services/          # Use Cases — оркестрация бизнес-логики
-├── infrastructure/    # БД (SQLAlchemy Async), HTTP-адаптеры (Portkey)
-├── api/               # FastAPI роутеры, middleware, DI
+├── domain/            # Pure entities, DTOs, contracts (zero external dependencies)
+├── services/          # Use Cases — business logic orchestration
+├── infrastructure/    # Database (SQLAlchemy Async), HTTP adapters (Portkey)
+├── api/               # FastAPI routers, middleware, DI
 ```
 
-## Быстрый старт
+## Quick Start
 
 ```bash
 cp .env.example .env
@@ -23,35 +23,35 @@ pip install -r requirements.txt
 uvicorn app.main:app --reload
 ```
 
-## Стек
+## Tech Stack
 
-| Компонент       | Технология                        |
+| Component       | Technology                        |
 |-----------------|-----------------------------------|
 | Backend         | FastAPI + Uvicorn                 |
-| HTTP-клиент     | httpx (async)                     |
-| БД              | SQLite (WAL) → PostgreSQL-ready   |
+| HTTP Client     | httpx (async)                     |
+| Database        | SQLite (WAL) → PostgreSQL-ready   |
 | ORM             | SQLAlchemy Async + aiosqlite      |
-| Валидация       | Pydantic V2                       |
+| Validation      | Pydantic V2                       |
 
-## Известные ограничения (POC)
+## Known Limitations (POC)
 
-### [RED-2] In-memory Rate Limiter — не работает в multi-worker среде
+### [RED-2] In-memory Rate Limiter — does not work in multi-worker deployments
 
-Текущая реализация rate limiter для защиты от brute-force атак использует
-in-memory `dict` внутри каждого процесса. В multi-worker развёртывании
-(например, `gunicorn -w 4 -k uvicorn.workers.UvicornWorker`) каждый воркер
-поддерживает собственный независимый счётчик неудачных попыток.
+The current rate limiter implementation for brute-force protection uses an
+in-memory `dict` within each process. In multi-worker deployments
+(e.g., `gunicorn -w 4 -k uvicorn.workers.UvicornWorker`) each worker
+maintains its own independent counter of failed attempts.
 
-**Последствия:** атакующий может распределить попытки между воркерами и
-обойти лимит (вместо 5 попыток получит `5 × N_workers`).
+**Impact:** an attacker can distribute attempts across workers and
+bypass the limit (instead of 5 attempts, they get `5 × N_workers`).
 
-**Рекомендация для продакшена:** заменить на Redis-backed sliding window
-rate limiter (например, через `redis-py` + Lua-скрипт или библиотеку
-`fastapi-limiter`).
+**Production recommendation:** replace with a Redis-backed sliding window
+rate limiter (e.g., via `redis-py` + Lua script or the
+`fastapi-limiter` library).
 
-Для текущего POC с одним воркером (`uvicorn --workers 1`) это ограничение
-не является критичным.
+For the current POC with a single worker (`uvicorn --workers 1`) this limitation
+is not critical.
 
-## Лицензия
+## License
 
 Proprietary — Phase 3 POC.

@@ -1,85 +1,85 @@
-# Спецификация: Сервис чата (ChatService)
+# Specification: Chat Service (ChatService)
 
-> **Файл реализации:** `chat_service.py`  
-> **Слой:** Services / Use Cases  
-> **Ответственность:** Оркестрация полного цикла отправки промпта к LLM через адаптер
-
----
-
-## 1. Общие правила
-
-- Сервис **не знает** о конкретных адаптерах — работает через контракт `GatewayProvider`.
-- Сервис **не знает** о HTTP/FastAPI — принимает и возвращает доменные DTO.
-- Учётные данные провайдера запрашиваются из БД **при каждом вызове** (горячая замена ключей).
-- Логирование делегируется в `LogService` (фоновая задача).
+> **Implementation file:** `chat_service.py`  
+> **Layer:** Services / Use Cases  
+> **Responsibility:** Orchestrating the full cycle of sending a prompt to an LLM via an adapter
 
 ---
 
-## 2. Класс: ChatService
+## 1. General Rules
 
-### Зависимости (через конструктор)
+- The service is **unaware** of specific adapters — it works through the `GatewayProvider` contract.
+- The service is **unaware** of HTTP/FastAPI — it accepts and returns domain DTOs.
+- Provider credentials are fetched from the database **on every call** (hot key rotation).
+- Logging is delegated to `LogService` (background task).
 
-| Параметр            | Тип                  | Описание                                    |
+---
+
+## 2. Class: ChatService
+
+### Dependencies (via constructor)
+
+| Parameter           | Type                 | Description                                 |
 |---------------------|----------------------|---------------------------------------------|
-| `provider_repo`     | `ProviderRepository` | Репозиторий для получения учётных данных     |
-| `log_service`       | `LogService`         | Сервис логирования                          |
-| `adapter`           | `GatewayProvider`    | Адаптер провайдера (инжектируется)          |
+| `provider_repo`     | `ProviderRepository` | Repository for fetching credentials         |
+| `log_service`       | `LogService`         | Logging service                             |
+| `adapter`           | `GatewayProvider`    | Provider adapter (injected)                 |
 
 ---
 
-## 3. Метод: send_chat_message
+## 3. Method: send_chat_message
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий следующие параметры:
-  - `model` (строка, обязательный) — идентификатор модели LLM.
-  - `messages` (список словарей, обязательный) — сообщения диалога.
-  - `provider_name` (строка, по умолчанию "portkey") — имя провайдера.
-  - `temperature` (число с плавающей точкой или отсутствует) — температура генерации.
-  - `max_tokens` (целое число или отсутствует) — максимальное количество токенов.
-  - `guardrail_ids` (список строк или отсутствует) — идентификаторы политик Guardrail.
-- **Возвращает:** UnifiedResponse при успехе или GatewayError при ошибке.
+- **Async method** accepting the following parameters:
+  - `model` (string, required) — LLM model identifier.
+  - `messages` (list of dicts, required) — conversation messages.
+  - `provider_name` (string, default "portkey") — provider name.
+  - `temperature` (float or absent) — generation temperature.
+  - `max_tokens` (integer or absent) — maximum number of tokens.
+  - `guardrail_ids` (list of strings or absent) — Guardrail policy identifiers.
+- **Returns:** UnifiedResponse on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Генерация Trace ID:**
-   - Создать `trace_id = str(uuid.uuid4())`.
+1. **Generate Trace ID:**
+   - Create `trace_id = str(uuid.uuid4())`.
 
-2. **Получение учётных данных провайдера:**
-   - Вызвать `provider_repo.get_active_by_name(provider_name)`.
-   - Если провайдер не найден или неактивен → вернуть `GatewayError(error_code="AUTH_FAILED", message="Провайдер не найден или деактивирован")`.
-   - Извлечь `api_key` и `base_url` из записи провайдера.
+2. **Fetch provider credentials:**
+   - Call `provider_repo.get_active_by_name(provider_name)`.
+   - If provider not found or inactive → return `GatewayError(error_code="AUTH_FAILED", message="Provider not found or deactivated")`.
+   - Extract `api_key` and `base_url` from the provider record.
 
-3. **Формирование UnifiedPrompt:**
-   - Создать `UnifiedPrompt` из входных параметров:
-     - `trace_id` — сгенерированный UUID.
-     - `model` — переданная модель.
-     - `messages` — список `MessageItem` из переданных словарей.
-     - `temperature`, `max_tokens` — если заданы.
-     - `guardrail_ids` — если заданы, иначе пустой список.
+3. **Build UnifiedPrompt:**
+   - Create `UnifiedPrompt` from input parameters:
+     - `trace_id` — generated UUID.
+     - `model` — provided model.
+     - `messages` — list of `MessageItem` from provided dicts.
+     - `temperature`, `max_tokens` — if provided.
+     - `guardrail_ids` — if provided, otherwise empty list.
 
-4. **Отправка через адаптер:**
-   - Вызвать `adapter.send_prompt(prompt, api_key, base_url)`.
-   - Получить результат: `UnifiedResponse` или `GatewayError`.
+4. **Send via adapter:**
+   - Call `adapter.send_prompt(prompt, api_key, base_url)`.
+   - Receive result: `UnifiedResponse` or `GatewayError`.
 
-5. **Логирование (асинхронное):**
-   - Независимо от результата — вызвать `log_service.log_chat_request(...)`:
-     - `trace_id` — сквозной ID.
-     - `prompt` — отправленный промпт (сериализованный).
-     - `response` — полученный ответ или ошибка (сериализованная).
-   - Логирование **не должно** блокировать возврат ответа пользователю.
+5. **Logging (asynchronous):**
+   - Regardless of result — call `log_service.log_chat_request(...)`:
+     - `trace_id` — correlation ID.
+     - `prompt` — sent prompt (serialized).
+     - `response` — received response or error (serialized).
+   - Logging **must not** block the response to the user.
 
-6. **Возврат результата:**
-   - Вернуть `UnifiedResponse` или `GatewayError` вызывающему коду.
+6. **Return result:**
+   - Return `UnifiedResponse` or `GatewayError` to the caller.
 
 ---
 
-## 4. Обработка ошибок
+## 4. Error Handling
 
-| Ситуация                              | Действие                                          |
+| Scenario                              | Action                                            |
 |---------------------------------------|---------------------------------------------------|
-| Провайдер не найден в БД              | `GatewayError(error_code="AUTH_FAILED")`          |
-| Ошибка БД при получении провайдера    | `GatewayError(error_code="UNKNOWN")`              |
-| Адаптер вернул `GatewayError`         | Пробросить как есть + залогировать                |
-| Непредвиденное исключение             | Обернуть в `GatewayError(error_code="UNKNOWN")`  |
-| Ошибка при логировании                | Подавить (не влияет на ответ пользователю)        |
+| Provider not found in DB              | `GatewayError(error_code="AUTH_FAILED")`          |
+| DB error when fetching provider       | `GatewayError(error_code="UNKNOWN")`              |
+| Adapter returned `GatewayError`       | Pass through as-is + log                          |
+| Unexpected exception                  | Wrap in `GatewayError(error_code="UNKNOWN")`      |
+| Logging error                         | Suppress (does not affect user response)          |

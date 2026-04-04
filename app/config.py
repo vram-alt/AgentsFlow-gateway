@@ -20,6 +20,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        extra="ignore",
     )
 
     database_url: str = "sqlite+aiosqlite:///./gateway.db"
@@ -29,6 +30,8 @@ class Settings(BaseSettings):
     encryption_key: str
     external_http_timeout: int = 30
     enable_tester_console: bool = False
+    demo_mode: bool = False
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
 
     # ------------------------------------------------------------------
     # Validators

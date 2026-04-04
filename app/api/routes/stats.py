@@ -1,6 +1,6 @@
-"""Роутер модуля Dashboard — агрегированная статистика и данные для графиков.
+"""Dashboard module router — aggregated statistics and chart data.
 
-Спецификация: app/api/routes/stats_spec.md
+Specification: app/api/routes/stats_spec.md
 """
 
 from __future__ import annotations
@@ -25,18 +25,18 @@ router = APIRouter(
     tags=["Stats"],
 )
 
-# ── Кэш для summary (§2.3) ──────────────────────────────────────────────
+# ── Cache for summary (§2.3) ──────────────────────────────────────────────
 _summary_cache: dict[str, Any] = {}
 _summary_cache_timestamp: float = 0.0
 _summary_cache_service_id: int | None = None
-_SUMMARY_CACHE_TTL: float = 60.0  # секунд
+_SUMMARY_CACHE_TTL: float = 60.0  # seconds
 
-# ── Async lock для защиты от параллельных запросов (§2.4) ────────────────
+# ── Async lock to protect against parallel requests (§2.4) ────────────────
 _summary_lock = asyncio.Lock()
 
 
 def _invalidate_cache_if_service_changed(service_id: int) -> None:
-    """Сбрасывает кэш, если сервис изменился (новый мок в тестах)."""
+    """Reset cache if service changed (new mock in tests)."""
     global _summary_cache, _summary_cache_timestamp, _summary_cache_service_id
     if (
         _summary_cache_service_id is not None
@@ -52,20 +52,20 @@ async def get_stats_summary(
     log_service: LogService = Depends(get_log_service),
     _user: str = Depends(get_current_user),
 ) -> Any:
-    """GET /api/stats/summary — сводная статистика (§2)."""
+    """GET /api/stats/summary — summary statistics (§2)."""
     global _summary_cache, _summary_cache_timestamp
 
-    # Сбрасываем кэш если сервис изменился (для тестов с разными моками)
+    # Reset cache if service changed (for tests with different mocks)
     _invalidate_cache_if_service_changed(id(log_service))
 
-    # §2.5 п.1: Проверить кэш
+    # §2.5 step 1: Check cache
     now = time.monotonic()
     if _summary_cache and (now - _summary_cache_timestamp) < _SUMMARY_CACHE_TTL:
         return _summary_cache
 
-    # §2.4: Захватить блокировку
+    # §2.4: Acquire lock
     async with _summary_lock:
-        # §2.5 п.3: Double-check кэша после захвата блокировки
+        # §2.5 step 3: Double-check cache after acquiring lock
         now = time.monotonic()
         if _summary_cache and (now - _summary_cache_timestamp) < _SUMMARY_CACHE_TTL:
             return _summary_cache
@@ -88,7 +88,7 @@ async def get_stats_summary(
                 },
             )
 
-        # §2.5 п.6: Сохранить в кэш
+        # §2.5 step 6: Save to cache
         _summary_cache = result
         _summary_cache_timestamp = time.monotonic()
 
@@ -101,7 +101,7 @@ async def get_stats_charts(
     log_service: LogService = Depends(get_log_service),
     _user: str = Depends(get_current_user),
 ) -> Any:
-    """GET /api/stats/charts — данные для графиков (§3)."""
+    """GET /api/stats/charts — chart data (§3)."""
     try:
         result = await log_service.get_chart_data(hours=hours)
     except Exception as exc:

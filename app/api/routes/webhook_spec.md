@@ -1,63 +1,63 @@
-# Спецификация: Роутер вебхуков (webhook.py)
+# Specification: Webhook Router (webhook.py)
 
-> **Файл реализации:** `webhook.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** HTTP-обработчик для приёма входящих webhook-отчётов от провайдеров (Режим Б)
-
----
-
-## 1. Общие правила
-
-- Роут — тонкая обёртка: принимает HTTP-запрос, вызывает сервис, возвращает HTTP-ответ.
-- Бизнес-логика **запрещена** в роуте — только маршрутизация и трансформация.
-- Все зависимости получаются через FastAPI Depends.
+> **Implementation file:** `webhook.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** HTTP handler for receiving incoming webhook reports from providers (Mode B)
 
 ---
 
-## 2. Роутер
+## 1. General Rules
 
-**Префикс:** `/api/webhook`  
-**Теги:** "Webhook"  
-**Защита:** Статический токен X-Webhook-Secret (НЕ Basic Auth).
-
----
-
-## 3. Эндпоинт: POST /api/webhook
-
-### Назначение
-
-Приём входящих webhook-отчётов от провайдеров (Режим Б).
-
-### Ограничения входящего payload (защита от DoS)
-
-Для предотвращения атак типа «отказ в обслуживании» через сверхбольшие или глубоко вложенные JSON-тела, на уровне этого роута должны быть реализованы следующие проверки **до** передачи данных в сервис:
-
-- **Максимальный размер тела запроса:** 1 мегабайт. Если заголовок Content-Length превышает лимит или фактический размер тела больше лимита — немедленно вернуть HTTP 413 Payload Too Large.
-- **Максимальная глубина вложенности JSON:** 10 уровней. При обнаружении более глубокой вложенности — вернуть HTTP 422 с описанием ограничения.
-
-### Пошаговая логика
-
-1. **Проверка токена безопасности:**
-   - Извлечь заголовок X-Webhook-Secret.
-   - Сравнить с WEBHOOK_SECRET из переменных окружения.
-   - Если не совпадает → мгновенно вернуть HTTP 401 Unauthorized.
-
-2. **Валидация тела запроса:**
-   - Принять JSON-тело как словарь (свободная структура).
-   - Если невалидный JSON → HTTP 422.
-
-3. **Обработка:**
-   - Вызвать webhook_service.process_guardrail_incident(payload).
-   - Вернуть HTTP 200 с подтверждением.
+- The route is a thin wrapper: accepts an HTTP request, calls the service, returns an HTTP response.
+- Business logic is **prohibited** in the route — only routing and transformation.
+- All dependencies are obtained via FastAPI Depends.
 
 ---
 
-## 4. Обработка ошибок
+## 2. Router
 
-| HTTP-статус | Когда                                    |
+**Prefix:** `/api/webhook`  
+**Tags:** "Webhook"  
+**Protection:** Static token X-Webhook-Secret (NOT Basic Auth).
+
+---
+
+## 3. Endpoint: POST /api/webhook
+
+### Purpose
+
+Receive incoming webhook reports from providers (Mode B).
+
+### Incoming Payload Constraints (DoS Protection)
+
+To prevent denial-of-service attacks via oversized or deeply nested JSON bodies, the following checks must be implemented at this route level **before** passing data to the service:
+
+- **Maximum request body size:** 1 megabyte. If the Content-Length header exceeds the limit or the actual body size exceeds the limit — immediately return HTTP 413 Payload Too Large.
+- **Maximum JSON nesting depth:** 10 levels. If deeper nesting is detected — return HTTP 422 with a description of the constraint.
+
+### Step-by-Step Logic
+
+1. **Security token verification:**
+   - Extract the X-Webhook-Secret header.
+   - Compare with WEBHOOK_SECRET from environment variables.
+   - If mismatch → immediately return HTTP 401 Unauthorized.
+
+2. **Request body validation:**
+   - Accept the JSON body as a dict (free-form structure).
+   - If invalid JSON → HTTP 422.
+
+3. **Processing:**
+   - Call webhook_service.process_guardrail_incident(payload).
+   - Return HTTP 200 with confirmation.
+
+---
+
+## 4. Error Handling
+
+| HTTP Status | When                                     |
 |-------------|------------------------------------------|
-| 200         | Успешная обработка webhook               |
-| 401         | Невалидный X-Webhook-Secret             |
-| 413         | Превышен максимальный размер тела запроса|
-| 422         | Невалидный JSON или глубина вложенности  |
-| 500         | Внутренняя ошибка сервера                |
+| 200         | Successful webhook processing            |
+| 401         | Invalid X-Webhook-Secret                 |
+| 413         | Maximum request body size exceeded       |
+| 422         | Invalid JSON or nesting depth exceeded   |
+| 500         | Internal server error                    |

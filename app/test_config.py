@@ -1,5 +1,5 @@
 """
-TDD Red-фаза: тесты для app/config.py
+TDD Red phase: тесты для app/config.py
 
 Проверяют:
 - Загрузку переменных окружения через Pydantic Settings
@@ -10,7 +10,7 @@ TDD Red-фаза: тесты для app/config.py
 - Синглтон-поведение get_settings()
 - Каст типов (external_http_timeout → int)
 
-Спецификация: app/config_spec.md
+Specification: app/config_spec.md
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ from pydantic import ValidationError
 from app.config import Settings, get_settings
 
 # ---------------------------------------------------------------------------
-# Фикстуры: валидные значения окружения
+# Fixtures: валидные значения окружения
 # ---------------------------------------------------------------------------
 
 # Валидный Fernet-ключ: 32 байта → base64 = 44 символа
@@ -387,7 +387,7 @@ class TestDatabaseUrlValidation:
     """database_url должен быть непустой строкой."""
 
     def test_empty_database_url_rejected(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        """Пустая строка database_url → ValidationError."""
+        """Empty string database_url → ValidationError."""
         env = _valid_env()
         env["DATABASE_URL"] = ""
         for key, value in env.items():
@@ -445,7 +445,7 @@ class TestGetSettings:
 
 
 class TestEnableTesterConsole:
-    """Тесты для нового поля enable_tester_console.
+    """Tests for нового поля enable_tester_console.
 
     main_upgrade_spec.md §2: tester_router подключается условно,
     только если settings.enable_tester_console == True.

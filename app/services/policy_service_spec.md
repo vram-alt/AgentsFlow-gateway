@@ -1,163 +1,163 @@
-# Спецификация: Сервис политик безопасности (PolicyService)
+# Specification: Security Policy Service (PolicyService)
 
-> **Файл реализации:** `policy_service.py`  
-> **Слой:** Services / Use Cases  
-> **Ответственность:** CRUD-операции над политиками (Guardrails) с двусторонней синхронизацией с облаком провайдера
-
----
-
-## 1. Общие правила
-
-- Сервис координирует работу между `PolicyRepository` (локальная БД) и `GatewayProvider` (облако вендора).
-- Любое изменение политики должно быть синхронизировано: сначала облако, потом БД.
-- При ошибке синхронизации с облаком — операция отменяется, БД не изменяется.
-- Учётные данные провайдера запрашиваются из `ProviderRepository` при каждом вызове.
+> **Implementation file:** `policy_service.py`  
+> **Layer:** Services / Use Cases  
+> **Responsibility:** CRUD operations on policies (Guardrails) with bidirectional synchronization with the provider cloud
 
 ---
 
-## 2. Класс: PolicyService
+## 1. General Rules
 
-### Зависимости (через конструктор)
+- The service coordinates work between `PolicyRepository` (local DB) and `GatewayProvider` (vendor cloud).
+- Any policy change must be synchronized: cloud first, then DB.
+- On cloud synchronization error — the operation is cancelled, DB is not modified.
+- Provider credentials are fetched from `ProviderRepository` on every call.
 
-| Параметр            | Тип                  | Описание                                    |
+---
+
+## 2. Class: PolicyService
+
+### Dependencies (via constructor)
+
+| Parameter           | Type                 | Description                                 |
 |---------------------|----------------------|---------------------------------------------|
-| `policy_repo`       | `PolicyRepository`   | Репозиторий политик                         |
-| `provider_repo`     | `ProviderRepository` | Репозиторий провайдеров (для ключей)        |
-| `adapter`           | `GatewayProvider`    | Адаптер провайдера                          |
-| `log_service`       | `LogService`         | Сервис логирования                          |
+| `policy_repo`       | `PolicyRepository`   | Policy repository                           |
+| `provider_repo`     | `ProviderRepository` | Provider repository (for keys)              |
+| `adapter`           | `GatewayProvider`    | Provider adapter                            |
+| `log_service`       | `LogService`         | Logging service                             |
 
 ---
 
-## 3. Метод: create_policy
+## 3. Method: create_policy
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий следующие параметры:
-  - `name` (строка, обязательный) — название политики.
-  - `body` (словарь, обязательный) — JSON-тело конфигурации Guardrail.
-  - `provider_name` (строка, по умолчанию "portkey") — имя провайдера.
-- **Возвращает:** доменную сущность Policy при успехе или GatewayError при ошибке.
+- **Async method** accepting the following parameters:
+  - `name` (string, required) — policy name.
+  - `body` (dict, required) — JSON body of the Guardrail configuration.
+  - `provider_name` (string, default "portkey") — provider name.
+- **Returns:** Policy domain entity on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Получить учётные данные провайдера** из `provider_repo.get_active_by_name(provider_name)`.
-   - Если не найден → `GatewayError(error_code="AUTH_FAILED")`.
+1. **Fetch provider credentials** from `provider_repo.get_active_by_name(provider_name)`.
+   - If not found → `GatewayError(error_code="AUTH_FAILED")`.
 
-2. **Отправить конфигурацию в облако** через `adapter.create_guardrail(body, api_key, base_url)`.
-   - Если ошибка → вернуть `GatewayError` (БД не трогаем).
+2. **Send configuration to cloud** via `adapter.create_guardrail(body, api_key, base_url)`.
+   - On error → return `GatewayError` (DB is not modified).
 
-3. **Сохранить в локальную БД** через `policy_repo.create(name, body, remote_id, provider_id)`.
-   - `remote_id` — из ответа облака.
+3. **Save to local DB** via `policy_repo.create(name, body, remote_id, provider_id)`.
+   - `remote_id` — from the cloud response.
 
-4. **Вернуть** доменную сущность `Policy`.
-
----
-
-## 4. Метод: update_policy
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий следующие параметры:
-  - `policy_id` (целое число, обязательный) — идентификатор политики в БД.
-  - `name` (строка или отсутствует) — новое название (если меняется).
-  - `body` (словарь или отсутствует) — новое JSON-тело (если меняется).
-- **Возвращает:** доменную сущность Policy при успехе или GatewayError при ошибке.
-
-### Пошаговая логика
-
-1. **Найти политику** в БД по `policy_id`.
-   - Если не найдена → `GatewayError(error_code="VALIDATION_ERROR", message="Политика не найдена")`.
-
-2. **Если изменилось `body`** и есть `remote_id`:
-   - Получить учётные данные провайдера.
-   - Отправить обновление в облако через `adapter.update_guardrail(remote_id, body, ...)`.
-   - Если ошибка → вернуть `GatewayError` (БД не трогаем).
-
-3. **Обновить запись в БД** через `policy_repo.update(policy_id, **changed_fields)`.
-
-4. **Вернуть** обновлённую сущность `Policy`.
+4. **Return** the `Policy` domain entity.
 
 ---
 
-## 5. Метод: delete_policy
+## 4. Method: update_policy
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий один параметр: `policy_id` (целое число — идентификатор политики в БД).
-- **Возвращает:** булево True при успехе или GatewayError при ошибке.
+- **Async method** accepting the following parameters:
+  - `policy_id` (integer, required) — policy identifier in DB.
+  - `name` (string or absent) — new name (if changing).
+  - `body` (dict or absent) — new JSON body (if changing).
+- **Returns:** Policy domain entity on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Найти политику** в БД по `policy_id`.
-   - Если не найдена → `GatewayError`.
+1. **Find the policy** in DB by `policy_id`.
+   - If not found → `GatewayError(error_code="VALIDATION_ERROR", message="Policy not found")`.
 
-2. **Если есть `remote_id`:**
-   - Получить учётные данные провайдера.
-   - Удалить в облаке через `adapter.delete_guardrail(remote_id, ...)`.
-   - Если ошибка облака → вернуть `GatewayError` (БД не трогаем).
+2. **If `body` changed** and `remote_id` exists:
+   - Fetch provider credentials.
+   - Send update to cloud via `adapter.update_guardrail(remote_id, body, ...)`.
+   - On error → return `GatewayError` (DB is not modified).
 
-3. **Soft Delete в БД** через `policy_repo.soft_delete(policy_id)`.
+3. **Update the DB record** via `policy_repo.update(policy_id, **changed_fields)`.
 
-4. **Вернуть** `True`.
-
----
-
-## 6. Метод: list_policies
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий один параметр: `only_active` (булево, по умолчанию True) — фильтр по активности.
-- **Возвращает:** список доменных сущностей Policy.
-
-### Пошаговая логика
-
-1. Вызвать `policy_repo.list_all(only_active=only_active)`.
-2. Преобразовать ORM-модели в доменные сущности `Policy`.
-3. Вернуть список.
+4. **Return** the updated `Policy` entity.
 
 ---
 
-## 7. Метод: sync_policies_from_provider
+## 5. Method: delete_policy
 
-### Назначение
+### Interface Description
 
-Загрузка существующих политик из облака провайдера и синхронизация с локальной БД.
-Вызывается по кнопке «Синхронизация» в UI.
+- **Async method** accepting one parameter: `policy_id` (integer — policy identifier in DB).
+- **Returns:** boolean True on success or GatewayError on error.
 
-### Описание интерфейса
+### Step-by-Step Logic
 
-- **Асинхронный метод**, принимающий один параметр: `provider_name` (строка, по умолчанию "portkey") — имя провайдера для синхронизации.
-- **Возвращает:** словарь с отчётом о синхронизации.
+1. **Find the policy** in DB by `policy_id`.
+   - If not found → `GatewayError`.
 
-### Пошаговая логика
+2. **If `remote_id` exists:**
+   - Fetch provider credentials.
+   - Delete in cloud via `adapter.delete_guardrail(remote_id, ...)`.
+   - On cloud error → return `GatewayError` (DB is not modified).
 
-1. **Получить учётные данные провайдера** из `provider_repo`.
+3. **Soft Delete in DB** via `policy_repo.soft_delete(policy_id)`.
 
-2. **Запросить список политик из облака** через `adapter.list_guardrails(api_key, base_url)`.
-   - Если ошибка → вернуть `GatewayError`.
-
-3. **Для каждой политики из облака:**
-   - Проверить, существует ли в БД запись с таким `remote_id` через `policy_repo.get_by_remote_id(remote_id)`.
-   - **Если НЕ существует** → создать новую запись через `policy_repo.create(...)`.
-   - **Если существует** → обновить `name` и `body` если отличаются.
-
-4. **Вернуть отчёт о синхронизации** — словарь со следующими ключами:
-
-   | Ключ            | Тип   | Описание                          |
-   |-----------------|-------|-----------------------------------|
-   | `created`       | целое | Количество новых политик          |
-   | `updated`       | целое | Количество обновлённых            |
-   | `unchanged`     | целое | Количество без изменений          |
-   | `total_remote`  | целое | Всего политик в облаке провайдера |
+4. **Return** `True`.
 
 ---
 
-## 8. Обработка ошибок
+## 6. Method: list_policies
 
-| Ситуация                              | Действие                                          |
+### Interface Description
+
+- **Async method** accepting one parameter: `only_active` (boolean, default True) — activity filter.
+- **Returns:** list of Policy domain entities.
+
+### Step-by-Step Logic
+
+1. Call `policy_repo.list_all(only_active=only_active)`.
+2. Convert ORM models to `Policy` domain entities.
+3. Return the list.
+
+---
+
+## 7. Method: sync_policies_from_provider
+
+### Purpose
+
+Load existing policies from the provider cloud and synchronize with the local DB.
+Triggered by the "Sync" button in the UI.
+
+### Interface Description
+
+- **Async method** accepting one parameter: `provider_name` (string, default "portkey") — provider name for synchronization.
+- **Returns:** dict with a synchronization report.
+
+### Step-by-Step Logic
+
+1. **Fetch provider credentials** from `provider_repo`.
+
+2. **Request the policy list from cloud** via `adapter.list_guardrails(api_key, base_url)`.
+   - On error → return `GatewayError`.
+
+3. **For each policy from cloud:**
+   - Check if a DB record with that `remote_id` exists via `policy_repo.get_by_remote_id(remote_id)`.
+   - **If not found** → create a new record via `policy_repo.create(...)`.
+   - **If found** → update `name` and `body` if they differ.
+
+4. **Return the synchronization report** — a dict with the following keys:
+
+   | Key             | Type    | Description                       |
+   |-----------------|---------|-----------------------------------|
+   | `created`       | integer | Number of new policies            |
+   | `updated`       | integer | Number of updated policies        |
+   | `unchanged`     | integer | Number of unchanged policies      |
+   | `total_remote`  | integer | Total policies in provider cloud  |
+
+---
+
+## 8. Error Handling
+
+| Scenario                              | Action                                            |
 |---------------------------------------|---------------------------------------------------|
-| Провайдер не найден                   | `GatewayError(error_code="AUTH_FAILED")`          |
-| Ошибка облака при создании/обновлении | `GatewayError` — БД не изменяется                 |
-| Ошибка БД                             | `GatewayError(error_code="UNKNOWN")`              |
-| Политика не найдена по ID             | `GatewayError(error_code="VALIDATION_ERROR")`     |
-| Ошибка при синхронизации одной политики| Пропустить, продолжить с остальными, залогировать |
+| Provider not found                    | `GatewayError(error_code="AUTH_FAILED")`          |
+| Cloud error on create/update          | `GatewayError` — DB is not modified               |
+| DB error                              | `GatewayError(error_code="UNKNOWN")`              |
+| Policy not found by ID               | `GatewayError(error_code="VALIDATION_ERROR")`     |
+| Error syncing a single policy         | Skip, continue with remaining, log the error      |

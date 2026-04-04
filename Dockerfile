@@ -19,6 +19,9 @@ COPY main.py ./
 COPY alembic/ ./alembic/
 COPY alembic.ini ./
 
+# Copy seed database (if exists) for initial deployment
+COPY data/ ./data-seed/
+
 # ============================================================
 # Stage 2: Runtime — minimal rootless image
 # ============================================================
@@ -41,8 +44,15 @@ COPY --from=builder --chown=appuser:appuser /build/main.py /app/main.py
 COPY --from=builder --chown=appuser:appuser /build/alembic /app/alembic
 COPY --from=builder --chown=appuser:appuser /build/alembic.ini /app/alembic.ini
 
-# Create data directory for SQLite persistence
+# Copy seed database to a separate directory (not the volume mount point)
+COPY --from=builder --chown=appuser:appuser /build/data-seed/ /app/data-seed/
+
+# Create data directory for SQLite persistence (will be mounted as volume)
 RUN mkdir -p /app/data && chown appuser:appuser /app/data
+
+# Copy entrypoint script
+COPY --chown=appuser:appuser docker-entrypoint.sh /app/docker-entrypoint.sh
+RUN chmod +x /app/docker-entrypoint.sh
 
 # Put venv on PATH
 ENV PATH="/app/.venv/bin:$PATH" \
@@ -57,4 +67,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["python", "-m", "uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -1,126 +1,126 @@
-# Спецификация: Репозитории — CRUD-операции (repositories.py)
+# Specification: Repositories — CRUD Operations (repositories.py)
 
-> **Файл реализации:** `repositories.py`  
-> **Слой:** Infrastructure (внешний мир — I/O)  
-> **Ответственность:** Инкапсуляция всех SQL-запросов. Сервисный слой работает с репозиториями, а не с ORM напрямую.
-
----
-
-## 1. Общие правила
-
-- Все операции с БД — **асинхронные** (через AsyncSession).
-- Репозитории принимают AsyncSession как зависимость (Dependency Injection).
-- ORM-модели SQLAlchemy **не экспортируются** за пределы слоя infrastructure.
-- Все методы — async.
-- Сериализация body/payload (dict → JSON-строка) происходит **внутри** репозитория.
-- Десериализация (JSON-строка → dict) происходит **внутри** репозитория.
-- При ошибках БД — пробрасывается SQLAlchemyError (обработка — на уровне сервисов).
-- soft_delete устанавливает is_active=False и updated_at=utcnow().
+> **Implementation file:** `repositories.py`  
+> **Layer:** Infrastructure (external world — I/O)  
+> **Responsibility:** Encapsulating all SQL queries. The service layer works with repositories, not with ORM directly.
 
 ---
 
-## 2. Класс: ProviderRepository
+## 1. General Rules
 
-**Зависимость:** AsyncSession (через конструктор).
+- All DB operations are **asynchronous** (via AsyncSession).
+- Repositories accept AsyncSession as a dependency (Dependency Injection).
+- SQLAlchemy ORM models are **not exported** beyond the infrastructure layer.
+- All methods are async.
+- Serialization of body/payload (dict → JSON string) occurs **within** the repository.
+- Deserialization (JSON string → dict) occurs **within** the repository.
+- On DB errors — SQLAlchemyError is propagated (handling is at the service level).
+- soft_delete sets is_active=False and updated_at=utcnow().
 
-| Метод                                          | Возвращает              | Описание                                    |
+---
+
+## 2. Class: ProviderRepository
+
+**Dependency:** AsyncSession (via constructor).
+
+| Method                                         | Returns                 | Description                                 |
 |------------------------------------------------|-------------------------|---------------------------------------------|
-| get_active_by_name(name: str)                  | ProviderModel или None  | Найти активного провайдера по имени          |
-| get_by_id(provider_id: int)                    | ProviderModel или None  | Найти провайдера по ID                       |
-| list_all(only_active: bool = True)             | список ProviderModel    | Список всех (или только активных) провайдеров|
-| create(name, api_key, base_url)                | ProviderModel           | Создать нового провайдера                    |
-| update(provider_id, **fields)                  | ProviderModel или None  | Обновить поля провайдера                     |
-| soft_delete(provider_id: int)                  | bool                    | Пометить как неактивного (is_active=False)   |
+| get_active_by_name(name: str)                  | ProviderModel or None   | Find an active provider by name             |
+| get_by_id(provider_id: int)                    | ProviderModel or None   | Find a provider by ID                       |
+| list_all(only_active: bool = True)             | list of ProviderModel   | List all (or only active) providers         |
+| create(name, api_key, base_url)                | ProviderModel           | Create a new provider                       |
+| update(provider_id, **fields)                  | ProviderModel or None   | Update provider fields                      |
+| soft_delete(provider_id: int)                  | bool                    | Mark as inactive (is_active=False)          |
 
 ---
 
-## 3. Класс: PolicyRepository
+## 3. Class: PolicyRepository
 
-**Зависимость:** AsyncSession (через конструктор).
+**Dependency:** AsyncSession (via constructor).
 
-| Метод                                          | Возвращает              | Описание                                    |
+| Method                                         | Returns                 | Description                                 |
 |------------------------------------------------|-------------------------|---------------------------------------------|
-| get_by_id(policy_id: int)                      | PolicyModel или None    | Найти политику по ID                         |
-| get_by_remote_id(remote_id: str)               | PolicyModel или None    | Найти политику по remote_id вендора          |
-| list_all(only_active: bool = True)             | список PolicyModel      | Список всех (или только активных) политик    |
-| list_by_provider(provider_id: int)             | список PolicyModel      | Политики конкретного провайдера              |
-| create(name, body, remote_id, provider_id)     | PolicyModel             | Создать новую политику                       |
-| update(policy_id, **fields)                    | PolicyModel или None    | Обновить поля политики                       |
-| soft_delete(policy_id: int)                    | bool                    | Пометить как неактивную (is_active=False)    |
-| upsert_by_remote_id(remote_id, name, body, provider_id) | PolicyModel  | Создать или обновить по remote_id (для синхронизации) |
+| get_by_id(policy_id: int)                      | PolicyModel or None     | Find a policy by ID                         |
+| get_by_remote_id(remote_id: str)               | PolicyModel or None     | Find a policy by vendor remote_id           |
+| list_all(only_active: bool = True)             | list of PolicyModel     | List all (or only active) policies          |
+| list_by_provider(provider_id: int)             | list of PolicyModel     | Policies for a specific provider            |
+| create(name, body, remote_id, provider_id)     | PolicyModel             | Create a new policy                         |
+| update(policy_id, **fields)                    | PolicyModel or None     | Update policy fields                        |
+| soft_delete(policy_id: int)                    | bool                    | Mark as inactive (is_active=False)          |
+| upsert_by_remote_id(remote_id, name, body, provider_id) | PolicyModel  | Create or update by remote_id (for sync)    |
 
 ---
 
-## 4. Класс: LogRepository
+## 4. Class: LogRepository
 
-**Зависимость:** AsyncSession (через конструктор).
+**Dependency:** AsyncSession (via constructor).
 
-### 4.1. Существующие методы
+### 4.1. Existing Methods
 
-| Метод                                          | Возвращает              | Описание                                    |
+| Method                                         | Returns                 | Description                                 |
 |------------------------------------------------|-------------------------|---------------------------------------------|
-| create(trace_id, event_type, payload)          | LogEntryModel           | Записать новое событие в журнал              |
-| get_by_trace_id(trace_id: str)                 | список LogEntryModel    | Все события по trace_id (промпт + инциденты) |
-| list_all(limit: int = 100, offset: int = 0)    | список LogEntryModel    | Постраничный список всех событий             |
-| list_by_type(event_type: str, limit, offset)   | список LogEntryModel    | Фильтрация по типу события                  |
-| count_all()                                    | int                     | Общее количество записей                     |
-| count_by_type(event_type: str)                 | int                     | Количество записей определённого типа        |
+| create(trace_id, event_type, payload)          | LogEntryModel           | Write a new event to the audit log          |
+| get_by_trace_id(trace_id: str)                 | list of LogEntryModel   | All events by trace_id (prompt + incidents) |
+| list_all(limit: int = 100, offset: int = 0)    | list of LogEntryModel   | Paginated list of all events                |
+| list_by_type(event_type: str, limit, offset)   | list of LogEntryModel   | Filter by event type                        |
+| count_all()                                    | int                     | Total record count                          |
+| count_by_type(event_type: str)                 | int                     | Record count for a specific type            |
 
-### 4.2. Метод: get_by_id
+### 4.2. Method: get_by_id
 
-- **Назначение:** Получение одной записи лога по числовому первичному ключу (id). Необходим для эндпоинта POST /api/logs/{id}/replay.
-- **Параметры:** `log_id` — целое число, первичный ключ записи.
-- **Возвращает:** экземпляр `LogEntryModel` или None (если запись не найдена).
-- **Алгоритм:** Выполнить SQL-запрос SELECT к таблице `logs` с фильтром по колонке `id`, равной переданному `log_id`. Вернуть единственный результат или None.
+- **Purpose:** Retrieve a single log record by numeric primary key (id). Required for the POST /api/logs/{id}/replay endpoint.
+- **Parameters:** `log_id` — integer, record primary key.
+- **Returns:** `LogEntryModel` instance or None (if record not found).
+- **Algorithm:** Execute a SELECT SQL query on the `logs` table with a filter on the `id` column equal to the provided `log_id`. Return the single result or None.
 
-### 4.3. Метод: count_by_hour
+### 4.3. Method: count_by_hour
 
-- **Назначение:** Группировка записей лога по часовым интервалам для построения графика активности. Необходим для эндпоинта GET /api/stats/charts.
-- **Параметры:** `since` — объект datetime (timezone-aware, UTC), начальная точка временного диапазона.
-- **Возвращает:** список кортежей (hour_string, count), где `hour_string` — строка в формате "YYYY-MM-DD HH:00", `count` — целое число.
-- **Алгоритм:**
-  1. Выполнить SQL-запрос к таблице `logs`: фильтр `created_at` >= `since`, группировка по результату форматирования `created_at` в строку "YYYY-MM-DD HH:00" через приватную функцию-хелпер `_format_hour(column)`, агрегация COUNT по каждой группе, сортировка по часовой строке в порядке возрастания.
-  2. Вернуть список кортежей.
-- **Совместимость с СУБД (DB Portability):** Форматирование даты ДОЛЖНО быть вынесено в отдельную приватную функцию-хелпер `_format_hour(column)`. Эта функция определяет диалект текущей СУБД через свойство диалекта сессии и возвращает: для SQLite — SQL-выражение через функцию `strftime`; для PostgreSQL — SQL-выражение через функцию `date_trunc`.
-- **Требование к индексу (Performance):** Добавить Alembic-миграцию, создающую индекс на колонке `logs.created_at` (имя индекса: `ix_logs_created_at`), если индекс ещё не существует. Миграция должна быть идемпотентной.
+- **Purpose:** Group log records by hourly intervals for building an activity chart. Required for the GET /api/stats/charts endpoint.
+- **Parameters:** `since` — datetime object (timezone-aware, UTC), start of the time range.
+- **Returns:** list of tuples (hour_string, count), where `hour_string` is a string in "YYYY-MM-DD HH:00" format, `count` is an integer.
+- **Algorithm:**
+  1. Execute a SQL query on the `logs` table: filter `created_at` >= `since`, group by the result of formatting `created_at` into a "YYYY-MM-DD HH:00" string via a private helper function `_format_hour(column)`, aggregate COUNT per group, sort by hour string in ascending order.
+  2. Return the list of tuples.
+- **DBMS Compatibility (DB Portability):** Date formatting MUST be extracted into a separate private helper function `_format_hour(column)`. This function determines the current DBMS dialect via the session dialect property and returns: for SQLite — a SQL expression via the `strftime` function; for PostgreSQL — a SQL expression via the `date_trunc` function.
+- **Index Requirement (Performance):** Add an Alembic migration creating an index on the `logs.created_at` column (index name: `ix_logs_created_at`), if the index does not already exist. The migration must be idempotent.
 
-### 4.4. Метод: aggregate_token_stats
+### 4.4. Method: aggregate_token_stats
 
-- **Назначение:** Агрегация статистики токенов и latency из JSON-поля `payload` всех записей. Необходим для эндпоинта GET /api/stats/summary.
-- **Параметры:** нет.
-- **Возвращает:** словарь с ключами `total_tokens` (целое число) и `avg_latency_ms` (число с плавающей точкой).
-- **Алгоритм:**
-  1. Выполнить SQL-запрос к таблице `logs`, извлекая ТОЛЬКО колонки `id` и `payload` для записей с `event_type` = "chat_request". Загрузка всех колонок запрещена для экономии памяти.
-  2. Использовать потоковую обработку результатов (server-side cursor с порционной выгрузкой по 500 записей за раз) вместо загрузки всех записей в память одним запросом.
-  3. Парсинг JSON из поля `payload` является CPU-bound операцией. Для предотвращения блокировки event-loop при большом количестве записей — выполнять парсинг в отдельном потоке (через executor или аналогичный механизм).
-  4. Для каждой записи: распарсить `payload` из JSON-строки в словарь (при ошибке парсинга — логировать `id` записи на уровне WARNING с сообщением "Corrupted payload in log entry" и пропустить запись); попытаться извлечь `response.usage.total_tokens` (если число — добавить к сумме); попытаться извлечь `response.latency_ms` (если число — добавить к списку latency).
-  5. Вычислить: `total_tokens` = сумма всех токенов; `avg_latency_ms` = среднее арифметическое latency, округлённое до 2 знаков (если список пуст — 0.0).
-  6. Вернуть словарь.
-- **Оптимизация:** Парсинг JSON в Python (а не через SQL JSON-функции) выбран сознательно: SQLite не имеет встроенных JSON-функций в стандартной поставке aiosqlite; объём данных на этапе POC невелик. При масштабировании на PostgreSQL можно использовать `jsonb` операторы. Меры: загружать только `id` и `payload`; фильтровать по `event_type` = "chat_request"; потоковая обработка по 500 записей; CPU-bound парсинг в отдельном потоке.
+- **Purpose:** Aggregate token and latency statistics from the JSON `payload` field of all records. Required for the GET /api/stats/summary endpoint.
+- **Parameters:** none.
+- **Returns:** dict with keys `total_tokens` (integer) and `avg_latency_ms` (float).
+- **Algorithm:**
+  1. Execute a SQL query on the `logs` table, extracting ONLY the `id` and `payload` columns for records with `event_type` = "chat_request". Loading all columns is prohibited to conserve memory.
+  2. Use streaming result processing (server-side cursor with batch fetching of 500 records at a time) instead of loading all records into memory in a single query.
+  3. JSON parsing from the `payload` field is a CPU-bound operation. To prevent event-loop blocking with a large number of records — perform parsing in a separate thread (via executor or similar mechanism).
+  4. For each record: parse `payload` from JSON string to dict (on parse error — log the record `id` at WARNING level with message "Corrupted payload in log entry" and skip the record); attempt to extract `response.usage.total_tokens` (if numeric — add to sum); attempt to extract `response.latency_ms` (if numeric — add to latency list).
+  5. Compute: `total_tokens` = sum of all tokens; `avg_latency_ms` = arithmetic mean of latency, rounded to 2 decimal places (if list is empty — 0.0).
+  6. Return the dict.
+- **Optimization:** JSON parsing in Python (rather than via SQL JSON functions) is a deliberate choice: SQLite does not have built-in JSON functions in the standard aiosqlite distribution; data volume at the POC stage is small. When scaling to PostgreSQL, `jsonb` operators can be used. Measures: load only `id` and `payload`; filter by `event_type` = "chat_request"; stream processing in batches of 500; CPU-bound parsing in a separate thread.
 
-### 4.5. Метод: list_for_export
+### 4.5. Method: list_for_export
 
-- **Назначение:** Получение записей лога для CSV-экспорта с опциональной фильтрацией по типу события. Необходим для эндпоинта GET /api/logs/export.
-- **Тип:** Асинхронный генератор.
-- **Параметры:** `event_type` (строка или None), `limit` (целое число, по умолчанию 5000).
-- **Yield:** экземпляры `LogEntryModel` (потоковая выгрузка).
-- **Алгоритм:**
-  1. Сформировать SQL-запрос SELECT к таблице `logs`.
-  2. Если `event_type` не None — добавить фильтр по колонке `event_type`.
-  3. Добавить сортировку по `created_at` в порядке убывания (новые записи первыми).
-  4. Добавить LIMIT равный переданному `limit`.
-  5. Выполнить запрос с использованием потоковой выгрузки (server-side cursor с порционной выгрузкой по 1000 записей за раз).
-  6. Yield каждую запись по мере получения из потока.
-- **Значение limit по умолчанию:** Снижено до 5000 для ограничения потребления памяти. При payload ~5KB на запись это ~25MB — допустимый объём.
+- **Purpose:** Retrieve log records for CSV export with optional event type filtering. Required for the GET /api/logs/export endpoint.
+- **Type:** Async generator.
+- **Parameters:** `event_type` (string or None), `limit` (integer, default 5000).
+- **Yield:** `LogEntryModel` instances (streaming).
+- **Algorithm:**
+  1. Build a SELECT SQL query on the `logs` table.
+  2. If `event_type` is not None — add a filter on the `event_type` column.
+  3. Add sorting by `created_at` in descending order (newest records first).
+  4. Add LIMIT equal to the provided `limit`.
+  5. Execute the query using streaming (server-side cursor with batch fetching of 1000 records at a time).
+  6. Yield each record as it is received from the stream.
+- **Default limit value:** Reduced to 5000 to limit memory consumption. At ~5KB per payload, this is ~25MB — an acceptable volume.
 
 ---
 
-## 5. Обработка ошибок
+## 5. Error Handling
 
-| Ситуация                        | Действие                                    |
+| Scenario                        | Action                                      |
 |---------------------------------|---------------------------------------------|
-| Дубликат UNIQUE-поля            | IntegrityError → пробрасывается в сервис    |
-| Запись не найдена               | Возвращается None                           |
-| Ошибка подключения к БД         | OperationalError → логирование + re-raise   |
-| Невалидный JSON при сериализации| ValueError → пробрасывается в сервис        |
-| Повреждённый JSON в payload     | WARNING-лог с id записи, запись пропускается|
+| UNIQUE field duplicate          | IntegrityError → propagated to service      |
+| Record not found                | Returns None                                |
+| DB connection error             | OperationalError → logging + re-raise       |
+| Invalid JSON on serialization   | ValueError → propagated to service          |
+| Corrupted JSON in payload       | WARNING log with record id, record skipped  |

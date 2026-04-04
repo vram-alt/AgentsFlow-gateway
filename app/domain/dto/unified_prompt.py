@@ -1,8 +1,8 @@
 """
-Pydantic V2 DTO: UnifiedPrompt и MessageItem.
+Pydantic V2 DTO: UnifiedPrompt and MessageItem.
 
-Стандартизированное представление запроса пользователя к LLM-провайдеру.
-Спецификация: unified_prompt_spec.md
+Standardized representation of a user request to an LLM provider.
+Specification: unified_prompt_spec.md
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class MessageItem(BaseModel):
-    """Вложенная frozen-модель сообщения диалога."""
+    """Nested frozen model for a conversation message."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -23,7 +23,7 @@ class MessageItem(BaseModel):
 
 
 class UnifiedPrompt(BaseModel):
-    """Frozen DTO для стандартизированного представления запроса к LLM-провайдеру."""
+    """Frozen DTO for a standardized request to an LLM provider."""
 
     model_config = ConfigDict(frozen=True)
 

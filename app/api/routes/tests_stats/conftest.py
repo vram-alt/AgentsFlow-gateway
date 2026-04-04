@@ -1,7 +1,7 @@
 """
-Общие фикстуры для тестов роутера Stats/Dashboard.
+Shared fixtures for Stats/Dashboard router tests.
 
-Извлечены из app/api/routes/test_stats.py при рефакторинге.
+Extracted from app/api/routes/test_stats.py during refactoring.
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from app.services.log_service import LogService
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 SAMPLE_SUMMARY = {
@@ -36,7 +36,7 @@ SAMPLE_CHART_DATA = [
 
 @pytest.fixture()
 def mock_log_service() -> AsyncMock:
-    """Мок LogService с async-методами."""
+    """Mock LogService with async methods."""
     svc = AsyncMock(spec=LogService)
     svc.get_stats_summary = AsyncMock(return_value=SAMPLE_SUMMARY)
     svc.get_chart_data = AsyncMock(return_value=SAMPLE_CHART_DATA)
@@ -45,7 +45,7 @@ def mock_log_service() -> AsyncMock:
 
 @pytest.fixture()
 def client(mock_log_service: AsyncMock) -> TestClient:
-    """TestClient с подменёнными зависимостями (LogService + auth bypass)."""
+    """TestClient with substituted dependencies (LogService + auth bypass)."""
     from app.api.dependencies.di import get_log_service
     from app.api.middleware.auth import get_current_user
 

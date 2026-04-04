@@ -1,6 +1,6 @@
-"""Роутер модуля Testing Console.
+"""Testing Console module router.
 
-Спецификация: app/api/routes/tester_spec.md
+Specification: app/api/routes/tester_spec.md
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ router = APIRouter(
     tags=["Tester"],
 )
 
-# ── Статическая схема формы (§2.4) ───────────────────────────────────────
+# ── Static form schema (§2.4) ───────────────────────────────────────
 
 _FORM_SCHEMA: dict[str, Any] = {
     "fields": [
@@ -79,7 +79,7 @@ _FORM_SCHEMA: dict[str, Any] = {
 async def get_tester_schema(
     _user: str = Depends(get_current_user),
 ) -> dict[str, Any]:
-    """GET /api/tester/schema — статическая JSON-схема формы (§2)."""
+    """GET /api/tester/schema — static JSON form schema (§2)."""
     return _FORM_SCHEMA
 
 
@@ -89,7 +89,7 @@ async def post_tester_proxy(
     tester_service: TesterService = Depends(get_tester_service),
     _user: str = Depends(get_current_user),
 ) -> Any:
-    """POST /api/tester/proxy — прокси-запрос к провайдеру (§3)."""
+    """POST /api/tester/proxy — proxy request to provider (§3)."""
     result = await tester_service.proxy_request(
         provider_name=request.provider_name,
         method=request.method,

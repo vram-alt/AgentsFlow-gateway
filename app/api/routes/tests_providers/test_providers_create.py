@@ -2,7 +2,7 @@
 Тесты для POST /api/providers/ — создание нового провайдера.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md
+Specification: app/api/routes/providers_spec.md
 """
 
 import pytest
@@ -21,7 +21,7 @@ from app.api.routes.tests_providers.conftest import (
 
 
 class TestCreateProvider:
-    """Тесты для POST /api/providers/ — создание провайдера."""
+    """Tests for POST /api/providers/ — создание a provider."""
 
     def test_create_provider_returns_201(
         self, client: TestClient, mock_provider_service: MagicMock
@@ -42,7 +42,7 @@ class TestCreateProvider:
     def test_create_provider_returns_body_with_provider_data(
         self, client: TestClient, mock_provider_service: MagicMock
     ):
-        """Ответ содержит данные созданного провайдера."""
+        """Ответ содержит данные созданного a provider."""
         fake = _make_fake_provider(provider_id=42, name="anthropic")
         mock_provider_service.create_provider.return_value = fake
 
@@ -121,7 +121,7 @@ class TestCreateProvider:
         assert response.status_code == 422
 
     def test_create_provider_empty_name_returns_422(self, client: TestClient):
-        """Пустая строка в name — HTTP 422 (min_length=1)."""
+        """Empty string в name — HTTP 422 (min_length=1)."""
         payload = {
             "name": "",
             "api_key": "sk-test-key-123",
@@ -132,7 +132,7 @@ class TestCreateProvider:
         assert response.status_code == 422
 
     def test_create_provider_empty_api_key_returns_422(self, client: TestClient):
-        """Пустая строка в api_key — HTTP 422 (min_length=1)."""
+        """Empty string в api_key — HTTP 422 (min_length=1)."""
         payload = {
             "name": "openai",
             "api_key": "",

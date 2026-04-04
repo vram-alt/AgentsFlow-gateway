@@ -2,7 +2,7 @@
 TDD-тесты для слоя репозиториев (repositories.py).
 
 Все тесты используют мок AsyncSession — реальная БД не нужна.
-Тесты ДОЛЖНЫ падать, пока repositories.py содержит только placeholder.
+Тесты ДОЛЖНЫ падать, until repositories.py содержит только placeholder.
 
 Покрытие:
   - ProviderRepository: CRUD + soft_delete
@@ -40,12 +40,12 @@ except ImportError:
     LogRepository = None  # type: ignore[assignment, misc]
 
     pytestmark = pytest.mark.skip(
-        reason="repositories.py ещё не реализован (placeholder)"
+        reason="repositories.py ещё is not implemented (placeholder)"
     )
 
 
 # ---------------------------------------------------------------------------
-# Фикстуры
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
@@ -134,7 +134,7 @@ def _make_log(**overrides) -> LogEntryModel:
 
 
 class TestProviderRepository:
-    """Тесты для ProviderRepository."""
+    """Tests for ProviderRepository."""
 
     # --- get_active_by_name ---
 
@@ -157,7 +157,7 @@ class TestProviderRepository:
     async def test_get_active_by_name_not_found(
         self, provider_repo: ProviderRepository, mock_session: AsyncMock
     ):
-        """Должен вернуть None, если провайдер не найден."""
+        """Должен вернуть None, if provider not found."""
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = result_mock
@@ -202,7 +202,7 @@ class TestProviderRepository:
     async def test_list_all_only_active(
         self, provider_repo: ProviderRepository, mock_session: AsyncMock
     ):
-        """По умолчанию возвращает только активных провайдеров."""
+        """By default возвращает только активных провайдеров."""
         providers = [
             _make_provider(id=1, is_active=True),
             _make_provider(id=2, is_active=True),
@@ -275,7 +275,7 @@ class TestProviderRepository:
     async def test_update_provider_not_found(
         self, provider_repo: ProviderRepository, mock_session: AsyncMock
     ):
-        """Должен вернуть None, если провайдер не найден."""
+        """Должен вернуть None, if provider not found."""
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = result_mock
@@ -305,7 +305,7 @@ class TestProviderRepository:
     async def test_soft_delete_provider_not_found(
         self, provider_repo: ProviderRepository, mock_session: AsyncMock
     ):
-        """soft_delete должен вернуть False, если провайдер не найден."""
+        """soft_delete должен вернуть False, if provider not found."""
         result_mock = MagicMock()
         result_mock.scalar_one_or_none.return_value = None
         mock_session.execute.return_value = result_mock
@@ -357,7 +357,7 @@ class TestProviderRepository:
 
 
 class TestPolicyRepository:
-    """Тесты для PolicyRepository."""
+    """Tests for PolicyRepository."""
 
     # --- get_by_id ---
 
@@ -631,7 +631,7 @@ class TestPolicyRepository:
 
 
 class TestLogRepository:
-    """Тесты для LogRepository."""
+    """Tests for LogRepository."""
 
     # --- create ---
 
@@ -708,7 +708,7 @@ class TestLogRepository:
     async def test_list_all_default_params(
         self, log_repo: LogRepository, mock_session: AsyncMock
     ):
-        """По умолчанию limit=100, offset=0."""
+        """By default limit=100, offset=0."""
         result_mock = MagicMock()
         result_mock.scalars.return_value.all.return_value = []
         mock_session.execute.return_value = result_mock
@@ -802,7 +802,7 @@ class TestLogRepository:
 
 
 class TestLogRepositoryGetById:
-    """Тесты для нового метода LogRepository.get_by_id (upgrade spec §1)."""
+    """Tests for нового метода LogRepository.get_by_id (upgrade spec §1)."""
 
     @pytest.mark.asyncio
     async def test_get_by_id_found(
@@ -849,7 +849,7 @@ class TestLogRepositoryGetById:
 
 
 class TestLogRepositoryCountByHour:
-    """Тесты для нового метода LogRepository.count_by_hour (upgrade spec §2)."""
+    """Tests for нового метода LogRepository.count_by_hour (upgrade spec §2)."""
 
     @pytest.mark.asyncio
     async def test_count_by_hour_returns_list_of_tuples(
@@ -908,7 +908,7 @@ class TestLogRepositoryCountByHour:
 
 
 class TestLogRepositoryAggregateTokenStats:
-    """Тесты для нового метода LogRepository.aggregate_token_stats (upgrade spec §3)."""
+    """Tests for нового метода LogRepository.aggregate_token_stats (upgrade spec §3)."""
 
     @pytest.mark.asyncio
     async def test_aggregate_token_stats_returns_dict(
@@ -996,7 +996,7 @@ class TestLogRepositoryAggregateTokenStats:
 
 
 class TestLogRepositoryListForExport:
-    """Тесты для нового метода LogRepository.list_for_export (upgrade spec §4)."""
+    """Tests for нового метода LogRepository.list_for_export (upgrade spec §4)."""
 
     @pytest.mark.asyncio
     async def test_list_for_export_yields_entries(

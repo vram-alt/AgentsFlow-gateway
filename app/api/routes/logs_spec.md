@@ -1,202 +1,202 @@
-# Спецификация: Роутер журнала событий (logs.py)
+# Specification: Event Log Router (logs.py)
 
-> **Файл реализации:** `logs.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** HTTP-обработчики для просмотра журнала событий, статистики, экспорта и replay
-
----
-
-## 1. Общие правила
-
-- Роуты — тонкие обёртки: принимают HTTP-запрос, вызывают сервис, возвращают HTTP-ответ.
-- Бизнес-логика **запрещена** в роутах — только маршрутизация и трансформация.
-- Все зависимости получаются через FastAPI Depends.
+> **Implementation file:** `logs.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** HTTP handlers for viewing the event log, statistics, export, and replay
 
 ---
 
-## 2. Роутер
+## 1. General Rules
 
-**Префикс:** `/api/logs`  
-**Теги:** "Logs"  
-**Защита:** HTTP Basic Auth.
-
-**Важно: порядок регистрации эндпоинтов.** Эндпоинты со статическими путями (`/export`, `/stats`) ДОЛЖНЫ быть зарегистрированы ПЕРЕД эндпоинтами с параметрами пути (`/{trace_id}`, `/{id}/replay`), иначе FastAPI интерпретирует статические сегменты как значения параметров.
+- Routes are thin wrappers: accept an HTTP request, call the service, return an HTTP response.
+- Business logic is **prohibited** in routes — only routing and transformation.
+- All dependencies are obtained via FastAPI Depends.
 
 ---
 
-## 3. Эндпоинт: GET /api/logs/
+## 2. Router
 
-### Назначение
+**Prefix:** `/api/logs`  
+**Tags:** "Logs"  
+**Protection:** HTTP Basic Auth.
 
-Постраничный список событий журнала с опциональным поиском по trace_id.
+**Important: endpoint registration order.** Endpoints with static paths (`/export`, `/stats`) MUST be registered BEFORE endpoints with path parameters (`/{trace_id}`, `/{id}/replay`), otherwise FastAPI interprets static segments as parameter values.
 
-### Query-параметры
+---
 
-| Параметр     | Тип                   | По умолчанию | Ограничения              | Описание                    |
+## 3. Endpoint: GET /api/logs/
+
+### Purpose
+
+Paginated list of log events with optional trace_id search.
+
+### Query Parameters
+
+| Parameter    | Type                  | Default      | Constraints              | Description                 |
 |--------------|-----------------------|--------------|--------------------------|-----------------------------|
-| `limit`      | целое число           | 100          | минимум 1, максимум 1000 | Количество записей          |
-| `offset`     | целое число           | 0            | минимум 0                | Смещение                    |
-| `event_type` | строка или None       | None         | —                        | Фильтр по типу события     |
-| `trace_id`   | строка или None       | None         | UUID v4 формат           | Поиск по trace_id           |
+| `limit`      | integer               | 100          | min 1, max 1000          | Number of records           |
+| `offset`     | integer               | 0            | min 0                    | Offset                      |
+| `event_type` | string or None        | None         | —                        | Filter by event type        |
+| `trace_id`   | string or None        | None         | UUID v4 format           | Search by trace_id          |
 
-### Защита от DoS
+### DoS Protection
 
-Параметр limit обязан иметь верхнюю границу (максимум 1000) для предотвращения полного сканирования таблицы и исчерпания памяти. Параметр offset не может быть отрицательным. Валидация обоих параметров выполняется на уровне Pydantic-схемы запроса. Максимальное допустимое значение limit рекомендуется вынести в конфигурацию приложения.
+The limit parameter must have an upper bound (maximum 1000) to prevent full table scans and memory exhaustion. The offset parameter cannot be negative. Validation of both parameters is performed at the Pydantic request schema level. The maximum allowed limit value should be externalized to application configuration.
 
-### Валидация trace_id
+### trace_id Validation
 
-Если `trace_id` передан и не пуст — валидировать его как UUID v4. Проверка выполняется через попытку парсинга строки как UUID с обработкой ошибки. Если строка не является валидным UUID — вернуть HTTP 422 с описанием ошибки "Invalid trace_id format, expected UUID v4". Это предотвращает передачу произвольных строк в слой данных.
+If `trace_id` is provided and non-empty — validate it as UUID v4. Validation is performed by attempting to parse the string as a UUID with error handling. If the string is not a valid UUID — return HTTP 422 with error description "Invalid trace_id format, expected UUID v4". This prevents passing arbitrary strings to the data layer.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. Если `trace_id` передан и не пуст:
-   - Валидировать формат UUID.
-   - Вызвать `log_service.get_logs_by_trace_id(trace_id)`.
-   - Вернуть результат (игнорируя `limit`, `offset`, `event_type`).
-2. Если `trace_id` не передан:
-   - Выполнить существующую логику (вызов `log_service.get_logs(limit, offset, event_type)`).
+1. If `trace_id` is provided and non-empty:
+   - Validate UUID format.
+   - Call `log_service.get_logs_by_trace_id(trace_id)`.
+   - Return the result (ignoring `limit`, `offset`, `event_type`).
+2. If `trace_id` is not provided:
+   - Execute existing logic (call `log_service.get_logs(limit, offset, event_type)`).
 
 ---
 
-## 4. Эндпоинт: GET /api/logs/export
+## 4. Endpoint: GET /api/logs/export
 
-### Назначение
+### Purpose
 
-Экспортирует записи журнала в формате CSV. Возвращает потоковый ответ (StreamingResponse) для эффективной передачи больших объёмов данных.
+Export log records in CSV format. Returns a streaming response (StreamingResponse) for efficient transfer of large data volumes.
 
-### Параметры запроса
+### Request Parameters
 
-| Параметр     | Тип            | Обязательный | По умолчанию | Описание                                                                 |
-|--------------|----------------|--------------|--------------|--------------------------------------------------------------------------|
-| `event_type` | строка или None| Нет          | None         | Фильтр по типу события. Если передан — экспортировать только этот тип.   |
-| `limit`      | целое число    | Нет          | 5000         | Максимальное количество записей. Диапазон: 1–50000.                      |
+| Parameter    | Type           | Required | Default      | Description                                                              |
+|--------------|----------------|----------|--------------|--------------------------------------------------------------------------|
+| `event_type` | string or None | No       | None         | Filter by event type. If provided — export only this type.               |
+| `limit`      | integer        | No       | 5000         | Maximum number of records. Range: 1–50000.                               |
 
-### Алгоритм обработки
+### Processing Algorithm
 
-1. Вызвать `log_service.export_logs(event_type=event_type, limit=limit)`.
-2. Метод сервиса возвращает асинхронный генератор строк CSV. Генератор использует потоковую выгрузку из репозитория (server-side cursor), что предотвращает загрузку всех записей в память.
-3. Вернуть `StreamingResponse` с:
+1. Call `log_service.export_logs(event_type=event_type, limit=limit)`.
+2. The service method returns an async generator of CSV strings. The generator uses streaming from the repository (server-side cursor), preventing loading all records into memory.
+3. Return `StreamingResponse` with:
    - `media_type` = "text/csv"
-   - Заголовок `Content-Disposition` = "attachment; filename=logs_export.csv"
+   - Header `Content-Disposition` = "attachment; filename=logs_export.csv"
 
-### Формат CSV
+### CSV Format
 
-Первая строка — заголовки колонок: `id`, `trace_id`, `event_type`, `created_at`, `payload`.
+First row — column headers: `id`, `trace_id`, `event_type`, `created_at`, `payload`.
 
-Каждая последующая строка — одна запись лога:
-- `id` — целое число.
-- `trace_id` — строка (UUID).
-- `event_type` — строка.
-- `created_at` — строка в формате ISO 8601.
-- `payload` — JSON-строка (экранированная для CSV). Защита от CSV Injection: если строковое значение начинается с символов `=`, `+`, `-`, `@`, `\t`, `\r` — перед значением добавляется префикс в виде одинарной кавычки. Это предотвращает выполнение формул при открытии CSV в Excel.
+Each subsequent row — one log record:
+- `id` — integer.
+- `trace_id` — string (UUID).
+- `event_type` — string.
+- `created_at` — string in ISO 8601 format.
+- `payload` — JSON string (escaped for CSV). CSV Injection protection: if a string value starts with characters `=`, `+`, `-`, `@`, `\t`, `\r` — a single quote prefix is prepended. This prevents formula execution when the CSV is opened in Excel.
 
-### Обработка ошибок экспорта
+### Export Error Handling
 
-- При ошибке из сервисного слоя — HTTP 500 с ключом `detail`.
-- Если ошибка произошла после начала потоковой передачи (HTTP-заголовки уже отправлены) — в конец CSV-потока добавляется строка-маркер `# ERROR: export interrupted`.
-
----
-
-## 5. Эндпоинт: GET /api/logs/stats
-
-### Назначение
-
-Статистика событий для дашборда.
-
-### Пошаговая логика
-
-1. Вызвать log_service.get_log_stats().
-2. Вернуть HTTP 200 со словарём статистики.
+- On service layer error — HTTP 500 with `detail` key.
+- If the error occurs after streaming has started (HTTP headers already sent) — an error marker string `# ERROR: export interrupted` is appended to the end of the CSV stream.
 
 ---
 
-## 6. Эндпоинт: GET /api/logs/{trace_id}
+## 5. Endpoint: GET /api/logs/stats
 
-### Назначение
+### Purpose
 
-Все события по конкретному trace_id.
+Event statistics for the dashboard.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. Вызвать log_service.get_logs_by_trace_id(trace_id).
-2. Вернуть HTTP 200 со списком связанных событий.
-
----
-
-## 7. Эндпоинт: POST /api/logs/{id}/replay
-
-### Назначение
-
-Повторяет (replay) ранее выполненный чат-запрос. Извлекает параметры оригинального запроса из payload записи лога и отправляет их заново через ChatService.
-
-### Параметры пути
-
-| Параметр | Тип | Описание                                              |
-|----------|-----|-------------------------------------------------------|
-| `id`     | int | Числовой первичный ключ записи лога (LogEntryModel.id)|
-
-### Зависимости
-
-- `LogService` — через DI-фабрику `get_log_service`.
-- `ChatService` — через DI-фабрику `get_chat_service`.
-
-### Rate Limiting (Защита от злоупотреблений)
-
-Эндпоинт replay позволяет повторно отправить запрос к LLM-провайдеру, что генерирует расходы на API-ключ. Для предотвращения злоупотреблений:
-- Максимум 10 replay-запросов в минуту на пользователя. При превышении — вернуть HTTP 429 с телом, содержащим `detail` = "Rate limit exceeded for replay requests".
-- Rate-limit реализуется через in-memory словарь с ключом = имя пользователя и значением = список временных меток последних запросов. Записи старше 60 секунд удаляются при каждой проверке.
-
-### Алгоритм обработки
-
-1. Проверить rate-limit. При превышении — вернуть HTTP 429.
-2. Вызвать `log_service.get_log_by_id(id)` для получения записи лога.
-3. Если запись не найдена — вернуть HTTP 404 с телом, содержащим `detail` = "Log entry not found".
-4. Если `event_type` записи не равен "chat_request" — вернуть HTTP 400 с телом, содержащим `detail` = "Only chat_request logs can be replayed".
-5. Извлечь из `payload` (JSON) параметры оригинального запроса:
-   - `payload.prompt.model` — строка, модель.
-   - `payload.prompt.messages` — список словарей с ключами `role` и `content`.
-   - `payload.prompt.temperature` — число или None.
-   - `payload.prompt.max_tokens` — целое число или None.
-   - `payload.prompt.guardrail_ids` — список строк или пустой список.
-6. **Валидация извлечённых данных**: извлечённые из payload данные ДОЛЖНЫ быть провалидированы через Pydantic-схему `ChatRequest` перед отправкой в `ChatService`. Если payload повреждён или модифицирован и не проходит валидацию — вернуть HTTP 400 с телом, содержащим `detail` = "Original request data is incomplete for replay".
-7. Логировать replay-событие на уровне INFO с пометкой `is_replay=true`, указав `log_id` оригинальной записи и имя пользователя (для аудита).
-8. Вызвать `chat_service.send_chat_message()` с провалидированными параметрами.
-9. Если результат — GatewayError — вернуть соответствующий HTTP-статус и тело ошибки.
-10. Если результат — UnifiedResponse — вернуть HTTP 200 с сериализованным ответом.
-
-### Формат ответа (HTTP 200)
-
-Идентичен формату ответа POST /api/chat/send:
-- `trace_id` — строка (новый UUID, не оригинальный).
-- `content` — строка, ответ модели.
-- `model` — строка.
-- `usage` — словарь с токенами или null.
-- `guardrail_blocked` — булево значение.
+1. Call log_service.get_log_stats().
+2. Return HTTP 200 with the statistics dict.
 
 ---
 
-## 8. Безопасность
+## 6. Endpoint: GET /api/logs/{trace_id}
 
-- Все эндпоинты требуют HTTP Basic Auth через зависимость `get_current_user`.
-- Параметр `trace_id` валидируется как UUID v4.
-- Replay создаёт НОВЫЙ trace_id (не переиспользует оригинальный).
-- Replay защищён rate-limiting: максимум 10 запросов в минуту на пользователя.
-- Каждый replay логируется с пометкой `is_replay=true` для аудита.
-- Данные из payload валидируются через Pydantic-схему перед отправкой в ChatService.
-- CSV-экспорт содержит чувствительные данные из payload — доступ ограничен аутентификацией.
-- CSV-значения экранируются для защиты от CSV Injection.
-- Значение `limit` по умолчанию для экспорта снижено до 5000 для ограничения потребления памяти.
+### Purpose
+
+All events for a specific trace_id.
+
+### Step-by-Step Logic
+
+1. Call log_service.get_logs_by_trace_id(trace_id).
+2. Return HTTP 200 with the list of related events.
 
 ---
 
-## 9. Обработка ошибок
+## 7. Endpoint: POST /api/logs/{id}/replay
 
-| HTTP-статус | Когда                                                        |
+### Purpose
+
+Replays a previously executed chat request. Extracts the original request parameters from the log record payload and resubmits them via ChatService.
+
+### Path Parameters
+
+| Parameter | Type | Description                                               |
+|-----------|------|-----------------------------------------------------------|
+| `id`      | int  | Numeric primary key of the log record (LogEntryModel.id)  |
+
+### Dependencies
+
+- `LogService` — via DI factory `get_log_service`.
+- `ChatService` — via DI factory `get_chat_service`.
+
+### Rate Limiting (Abuse Protection)
+
+The replay endpoint allows resending a request to the LLM provider, which incurs API key costs. To prevent abuse:
+- Maximum 10 replay requests per minute per user. On exceeding — return HTTP 429 with body containing `detail` = "Rate limit exceeded for replay requests".
+- Rate limit is implemented via an in-memory dict with key = username and value = list of timestamps of recent requests. Entries older than 60 seconds are purged on each check.
+
+### Processing Algorithm
+
+1. Check rate limit. On exceeding — return HTTP 429.
+2. Call `log_service.get_log_by_id(id)` to retrieve the log record.
+3. If record not found — return HTTP 404 with body containing `detail` = "Log entry not found".
+4. If the record's `event_type` is not "chat_request" — return HTTP 400 with body containing `detail` = "Only chat_request logs can be replayed".
+5. Extract original request parameters from `payload` (JSON):
+   - `payload.prompt.model` — string, model.
+   - `payload.prompt.messages` — list of dicts with `role` and `content` keys.
+   - `payload.prompt.temperature` — number or None.
+   - `payload.prompt.max_tokens` — integer or None.
+   - `payload.prompt.guardrail_ids` — list of strings or empty list.
+6. **Extracted data validation**: data extracted from payload MUST be validated via the `ChatRequest` Pydantic schema before sending to `ChatService`. If the payload is corrupted or modified and fails validation — return HTTP 400 with body containing `detail` = "Original request data is incomplete for replay".
+7. Log the replay event at INFO level with `is_replay=true` annotation, specifying the `log_id` of the original record and the username (for auditing).
+8. Call `chat_service.send_chat_message()` with the validated parameters.
+9. If result is GatewayError — return the corresponding HTTP status and error body.
+10. If result is UnifiedResponse — return HTTP 200 with the serialized response.
+
+### Response Format (HTTP 200)
+
+Identical to the POST /api/chat/send response format:
+- `trace_id` — string (new UUID, not the original).
+- `content` — string, model response.
+- `model` — string.
+- `usage` — dict with tokens or null.
+- `guardrail_blocked` — boolean.
+
+---
+
+## 8. Security
+
+- All endpoints require HTTP Basic Auth via the `get_current_user` dependency.
+- The `trace_id` parameter is validated as UUID v4.
+- Replay creates a NEW trace_id (does not reuse the original).
+- Replay is protected by rate limiting: maximum 10 requests per minute per user.
+- Each replay is logged with `is_replay=true` annotation for auditing.
+- Data from payload is validated via Pydantic schema before sending to ChatService.
+- CSV export contains sensitive data from payload — access is restricted by authentication.
+- CSV values are escaped for CSV Injection protection.
+- Default `limit` value for export is reduced to 5000 to limit memory consumption.
+
+---
+
+## 9. Error Handling
+
+| HTTP Status | When                                                         |
 |-------------|--------------------------------------------------------------|
-| 200         | Успешная операция                                            |
-| 400         | Тип события не chat_request / данные неполные для replay     |
-| 401         | Невалидный токен / не авторизован                            |
-| 404         | Запись лога не найдена (replay)                              |
-| 422         | Невалидные query-параметры / невалидный trace_id             |
+| 200         | Successful operation                                         |
+| 400         | Event type is not chat_request / data incomplete for replay  |
+| 401         | Invalid token / unauthorized                                 |
+| 404         | Log record not found (replay)                                |
+| 422         | Invalid query parameters / invalid trace_id                  |
 | 429         | Rate limit exceeded for replay requests                      |
-| 500         | Внутренняя ошибка сервера                                    |
+| 500         | Internal server error                                        |

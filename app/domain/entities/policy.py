@@ -1,11 +1,11 @@
 """
-Доменная сущность Policy — Pydantic V2 модели.
+Domain entity Policy — Pydantic V2 models.
 
-Схемы:
-  - PolicyBase: общие поля + валидация
-  - PolicyCreate: создание политики
-  - PolicyUpdate: частичное обновление (PATCH)
-  - Policy: полная сущность с id и датами
+Schemas:
+  - PolicyBase: shared fields + validation
+  - PolicyCreate: policy creation
+  - PolicyUpdate: partial update (PATCH)
+  - Policy: complete entity with id and timestamps
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pydantic import BaseModel, ConfigDict, Field, StringConstraints, field_vali
 from app.domain.utils.time import _utc_now
 
 
-# Тип для name с автоматическим strip и ограничениями длины
+# Type for name with automatic strip and length constraints
 StrippedName = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=200)
 ]
@@ -29,7 +29,7 @@ OptionalStrippedName = Annotated[
 
 
 class PolicyBase(BaseModel):
-    """Базовая схема с общими полями и валидацией."""
+    """Base schema with shared fields and validation."""
 
     name: StrippedName
     body: dict[str, Any]
@@ -40,8 +40,8 @@ class PolicyBase(BaseModel):
     @field_validator("body", mode="before")
     @classmethod
     def body_coerce_and_validate(cls, v: Any) -> dict[str, Any]:
-        """Принимает dict или JSON-строку; отклоняет пустой dict.
-        [SRE_MARKER] — пустая политика не должна пройти валидацию.
+        """Accepts dict or JSON string; rejects empty dict.
+        [SRE_MARKER] — an empty policy must not pass validation.
         """
         if isinstance(v, str):
             try:
@@ -56,11 +56,11 @@ class PolicyBase(BaseModel):
 
 
 class PolicyCreate(PolicyBase):
-    """Схема для создания политики (наследует всю валидацию PolicyBase)."""
+    """Schema for creating a policy (inherits all PolicyBase validation)."""
 
 
 class PolicyUpdate(BaseModel):
-    """Схема для частичного обновления (PATCH). Все поля опциональны."""
+    """Schema for partial update (PATCH). All fields are optional."""
 
     name: OptionalStrippedName | None = None
     body: dict[str, Any] | None = None
@@ -71,7 +71,7 @@ class PolicyUpdate(BaseModel):
     @field_validator("body", mode="before")
     @classmethod
     def body_coerce_and_validate(cls, v: Any) -> dict[str, Any] | None:
-        """[SRE_MARKER] — обновление политики пустым body обнулит guardrail."""
+        """[SRE_MARKER] — updating a policy with an empty body will nullify the guardrail."""
         if v is None:
             return v
         if isinstance(v, str):
@@ -87,7 +87,7 @@ class PolicyUpdate(BaseModel):
 
 
 class Policy(PolicyBase):
-    """Полная доменная сущность с id и временными метками."""
+    """Complete domain entity with id and timestamps."""
 
     model_config = ConfigDict(from_attributes=True)
 

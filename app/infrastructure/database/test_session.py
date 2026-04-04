@@ -2,7 +2,7 @@
 TDD-тесты для менеджера сессий БД (session.py).
 
 Все тесты используют моки — реальная БД не нужна.
-Тесты ДОЛЖНЫ падать, пока session.py содержит только placeholder.
+Тесты ДОЛЖНЫ падать, until session.py содержит только placeholder.
 
 Покрытие:
   - Создание engine с корректными параметрами (echo, pool_pre_ping, pool_size, max_overflow)
@@ -41,12 +41,12 @@ except (ImportError, AttributeError) as exc:
 # Если импорт не удался — все тесты в модуле будут пропущены
 if _IMPORT_ERROR is not None:
     pytestmark = pytest.mark.skip(
-        reason=f"session.py ещё не реализован: {_IMPORT_ERROR}"
+        reason=f"session.py ещё is not implemented: {_IMPORT_ERROR}"
     )
 
 
 # ---------------------------------------------------------------------------
-# Фикстуры
+# Fixtures
 # ---------------------------------------------------------------------------
 
 
@@ -74,7 +74,7 @@ def mock_session_factory(mock_async_session: AsyncMock) -> MagicMock:
 
 
 class TestEngineCreation:
-    """Тесты для корректного создания асинхронного движка."""
+    """Tests for корректного создания асинхронного движка."""
 
     @patch("app.infrastructure.database.session.create_async_engine")
     def test_engine_created_with_database_url(self, mock_create_engine: MagicMock):
@@ -157,7 +157,7 @@ class TestEngineCreation:
 
 
 class TestSQLiteWALMode:
-    """Тесты для автоматического включения WAL-режима при SQLite."""
+    """Tests for автоматического включения WAL-режима при SQLite."""
 
     @patch("app.infrastructure.database.session.event")
     @patch("app.infrastructure.database.session.create_async_engine")
@@ -253,7 +253,7 @@ class TestSQLiteWALMode:
 
 
 class TestSessionFactory:
-    """Тесты для фабрики сессий SessionLocal."""
+    """Tests for фабрики сессий SessionLocal."""
 
     def test_session_local_is_not_none(self):
         """SessionLocal должен быть создан (не None)."""
@@ -329,7 +329,7 @@ class TestSessionFactory:
 
 
 class TestGetDbSession:
-    """Тесты для асинхронного генератора get_db_session."""
+    """Tests for асинхронного генератора get_db_session."""
 
     @pytest.mark.asyncio
     async def test_get_db_session_yields_session(self):

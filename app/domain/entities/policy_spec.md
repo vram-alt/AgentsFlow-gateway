@@ -1,49 +1,49 @@
-# Спецификация: Доменная сущность Policy (policy.py)
+# Specification: Domain Entity Policy (policy.py)
 
-> **Файл реализации:** `policy.py`  
-> **Слой:** Domain (чистое ядро, 0 внешних зависимостей кроме Pydantic)  
-> **Ответственность:** Описание бизнес-сущности «Политика безопасности» (Guardrail)
-
----
-
-## 1. Общие правила
-
-- Модель наследуется от BaseModel (Pydantic).
-- Используется Pydantic V2 (конфигурация через ConfigDict).
-- Поля с датами имеют тип datetime. Значение по умолчанию задаётся через механизм фабрики (default_factory), которая вызывает получение текущего UTC-времени **при каждом создании экземпляра**, а не один раз при импорте модуля. Использовать timezone-aware вариант получения текущего времени (с явным указанием часового пояса UTC), т.к. вариант без timezone deprecated начиная с Python 3.12.
-- Булевы флаги активности по умолчанию True.
-- Модель **не содержит** логики работы с БД — это чистый доменный объект.
+> **Implementation file:** `policy.py`  
+> **Layer:** Domain (pure core, zero external dependencies except Pydantic)  
+> **Responsibility:** Describing the "Security Policy" (Guardrail) business entity
 
 ---
 
-## 2. Сущность: Policy
+## 1. General Rules
 
-### Назначение
-
-Хранит правила безопасности (Guardrails), которые синхронизируются с облаком провайдера.
-
-### Поля
-
-| Поле           | Тип              | Обязательное | По умолчанию     | Описание                                      |
-|----------------|------------------|--------------|------------------|-----------------------------------------------|
-| `id`           | целое или None   | Нет          | None             | Первичный ключ (назначается БД)               |
-| `name`         | строка           | Да           | —                | Человекочитаемое название политики             |
-| `body`         | словарь          | Да           | —                | JSON-тело правила (конфигурация Guardrail)     |
-| `remote_id`    | строка или None  | Нет          | None             | Идентификатор политики на стороне вендора      |
-| `provider_id`  | целое или None   | Нет          | None             | FK → Provider (к какому провайдеру привязана)  |
-| `is_active`    | булево           | Нет          | True             | Флаг активности (Soft Delete)                 |
-| `created_at`   | datetime         | Нет          | текущее UTC-время (через фабрику) | Дата создания записи              |
-| `updated_at`   | datetime         | Нет          | текущее UTC-время (через фабрику) | Дата последнего обновления        |
-
-### Валидация
-
-- `name`: минимум 1 символ, максимум 200 символов.
-- `body`: не пустой словарь (минимум 1 ключ).
-- `remote_id`: если задан — непустая строка.
+- The model inherits from BaseModel (Pydantic).
+- Uses Pydantic V2 (configuration via ConfigDict).
+- Date fields have type datetime. The default value is set via a factory mechanism (default_factory) that retrieves the current UTC time **on each instance creation**, not once at module import. Use the timezone-aware variant for obtaining the current time (with explicit UTC timezone), as the timezone-naive variant is deprecated starting with Python 3.12.
+- Boolean activity flags default to True.
+- The model **does not contain** database logic — it is a pure domain object.
 
 ---
 
-## 3. Обработка ошибок
+## 2. Entity: Policy
 
-Модель при невалидных данных выбрасывает стандартный pydantic.ValidationError.
-Никакой кастомной обработки ошибок на уровне сущности не предусмотрено — это ответственность вышестоящих слоёв (services, api).
+### Purpose
+
+Stores security rules (Guardrails) that are synchronized with the provider's cloud.
+
+### Fields
+
+| Field          | Type             | Required | Default          | Description                                   |
+|----------------|------------------|----------|------------------|-----------------------------------------------|
+| `id`           | int or None      | No       | None             | Primary key (assigned by DB)                  |
+| `name`         | string           | Yes      | —                | Human-readable policy name                    |
+| `body`         | dict             | Yes      | —                | JSON rule body (Guardrail configuration)      |
+| `remote_id`    | string or None   | No       | None             | Vendor-side policy identifier                 |
+| `provider_id`  | int or None      | No       | None             | FK → Provider (which provider it belongs to)  |
+| `is_active`    | boolean          | No       | True             | Activity flag (Soft Delete)                   |
+| `created_at`   | datetime         | No       | current UTC time (via factory) | Record creation timestamp     |
+| `updated_at`   | datetime         | No       | current UTC time (via factory) | Last update timestamp         |
+
+### Validation
+
+- `name`: minimum 1 character, maximum 200 characters.
+- `body`: non-empty dict (minimum 1 key).
+- `remote_id`: if provided — non-empty string.
+
+---
+
+## 3. Error Handling
+
+The model raises a standard pydantic.ValidationError on invalid data.
+No custom error handling is provided at the entity level — this is the responsibility of upstream layers (services, api).

@@ -1,10 +1,10 @@
 """
 TDD Red-phase тесты для роутера Testing Console (POST /api/tester/proxy, GET /api/tester/schema).
 
-Спецификация: app/api/routes/tester_spec.md
+Specification: app/api/routes/tester_spec.md
 
-Все тесты ДОЛЖНЫ падать на Red-фазе, пока роутер не реализован
-(tester.py пуст).
+Все тесты ДОЛЖНЫ падать на Red-фазе, until роутер is not implemented
+(tester.py is empty).
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ FAKE_TRACE_ID = str(uuid.uuid4())
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -191,7 +191,7 @@ class TestPostTesterProxySuccess:
     def test_response_contains_status_code(
         self, client: TestClient, mock_tester_service: AsyncMock
     ):
-        """Ответ содержит status_code от провайдера."""
+        """Ответ содержит status_code от a provider."""
         mock_tester_service.proxy_request.return_value = _make_proxy_success()
 
         response = client.post(
@@ -218,7 +218,7 @@ class TestPostTesterProxySuccess:
     def test_response_contains_body(
         self, client: TestClient, mock_tester_service: AsyncMock
     ):
-        """Ответ содержит body от провайдера."""
+        """Ответ содержит body от a provider."""
         mock_tester_service.proxy_request.return_value = _make_proxy_success()
 
         response = client.post(
@@ -287,7 +287,7 @@ class TestPostTesterProxyErrors:
     def test_provider_not_found_returns_404(
         self, client: TestClient, mock_tester_service: AsyncMock
     ):
-        """Провайдер не найден → HTTP 404 с error_code PROVIDER_NOT_FOUND."""
+        """Provider not found → HTTP 404 с error_code PROVIDER_NOT_FOUND."""
         mock_tester_service.proxy_request.return_value = _make_gateway_error(
             404, "PROVIDER_NOT_FOUND", "Provider 'unknown' not found"
         )
@@ -303,7 +303,7 @@ class TestPostTesterProxyErrors:
     def test_proxy_timeout_returns_504(
         self, client: TestClient, mock_tester_service: AsyncMock
     ):
-        """Таймаут провайдера → HTTP 504 с error_code PROXY_TIMEOUT."""
+        """Timeout провайдера → HTTP 504 с error_code PROXY_TIMEOUT."""
         mock_tester_service.proxy_request.return_value = _make_gateway_error(
             504, "PROXY_TIMEOUT", "Provider timed out"
         )
@@ -319,7 +319,7 @@ class TestPostTesterProxyErrors:
     def test_proxy_connection_error_returns_502(
         self, client: TestClient, mock_tester_service: AsyncMock
     ):
-        """Ошибка соединения → HTTP 502 с error_code PROXY_CONNECTION_ERROR."""
+        """Connection error → HTTP 502 с error_code PROXY_CONNECTION_ERROR."""
         mock_tester_service.proxy_request.return_value = _make_gateway_error(
             502, "PROXY_CONNECTION_ERROR", "Connection refused"
         )

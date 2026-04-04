@@ -106,6 +106,50 @@ def _reset_failures(request: Request, client_ip: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# _get_credential helpers — read from os.environ first, fallback to get_settings()
+# ---------------------------------------------------------------------------
+
+
+def _get_admin_username() -> str:
+    """Read ADMIN_USERNAME: os.environ first (test-compatible), then get_settings()."""
+    val = os.environ.get("ADMIN_USERNAME")
+    if val is not None:
+        return val
+    try:
+        from app.config import get_settings
+
+        return get_settings().admin_username
+    except Exception:
+        return ""
+
+
+def _get_admin_password() -> str:
+    """Read ADMIN_PASSWORD: os.environ first (test-compatible), then get_settings()."""
+    val = os.environ.get("ADMIN_PASSWORD")
+    if val is not None:
+        return val
+    try:
+        from app.config import get_settings
+
+        return get_settings().admin_password
+    except Exception:
+        return ""
+
+
+def _get_webhook_secret() -> str:
+    """Read WEBHOOK_SECRET: os.environ first (test-compatible), then get_settings()."""
+    val = os.environ.get("WEBHOOK_SECRET")
+    if val is not None:
+        return val
+    try:
+        from app.config import get_settings
+
+        return get_settings().webhook_secret
+    except Exception:
+        return ""
+
+
+# ---------------------------------------------------------------------------
 # verify_basic_auth
 # ---------------------------------------------------------------------------
 
@@ -124,8 +168,8 @@ def verify_basic_auth(
     # Rate limit check BEFORE credential validation
     _check_rate_limit(request, client_ip)
 
-    expected_username = os.environ.get("ADMIN_USERNAME", "")
-    expected_password = os.environ.get("ADMIN_PASSWORD", "")
+    expected_username = _get_admin_username()
+    expected_password = _get_admin_password()
 
     username_correct = hmac.compare_digest(
         credentials.username.encode("utf-8"),
@@ -167,7 +211,7 @@ def verify_webhook_secret(
     # Rate limit check BEFORE credential validation
     _check_rate_limit(request, client_ip)
 
-    expected_secret = os.environ.get("WEBHOOK_SECRET", "")
+    expected_secret = _get_webhook_secret()
 
     if hmac.compare_digest(
         x_webhook_secret.encode("utf-8"),
@@ -184,7 +228,7 @@ def verify_webhook_secret(
 
 
 # ---------------------------------------------------------------------------
-# get_current_user — реальная FastAPI-зависимость, делегирующая verify_basic_auth
+# get_current_user — actual FastAPI dependency delegating to verify_basic_auth
 # ---------------------------------------------------------------------------
 
 

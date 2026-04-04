@@ -1,198 +1,198 @@
-# Спецификация: Адаптер Portkey
+# Specification: Portkey Adapter
 
-> **Файл реализации:** `portkey_adapter.py`  
-> **Слой:** Infrastructure → Adapters  
-> **Ответственность:** Реализация контракта `GatewayProvider` для провайдера Portkey  
-> **Зависимости:** `httpx`, доменные DTO, контракт `GatewayProvider`
-
----
-
-## 1. Общие правила
-
-- Класс `PortkeyAdapter` реализует абстрактный интерфейс `GatewayProvider`.
-- Все HTTP-вызовы выполняются через `httpx.AsyncClient`.
-- Обязательный таймаут на все запросы: значение из `EXTERNAL_HTTP_TIMEOUT` (по умолчанию 30 сек).
-- Трансформация форматов (Portkey ↔ DTO) происходит **исключительно** внутри этого модуля.
-- Методы **никогда не выбрасывают исключения** наружу — все ошибки оборачиваются в `GatewayError`.
-
-### 1.1. Политика повторных попыток (Retry)
-
-Все HTTP-вызовы к внешнему API должны использовать механизм retry с экспоненциальной задержкой (exponential backoff):
-
-- **Максимум попыток:** 3 (первоначальный запрос + 2 повтора).
-- **Задержки между попытками:** 1 секунда, 2 секунды, 4 секунды (экспоненциальный рост).
-- **Условия для повтора GET-запросов:** транзиентные ошибки — HTTP 502, 503, ошибки соединения, таймауты.
-- **Условия для повтора POST/PUT/DELETE-запросов:** retry **только** при явных HTTP 502 и 503 (не при таймаутах и ошибках соединения, т.к. запрос мог быть частично обработан).
-- **При исчерпании попыток:** вернуть `GatewayError` с информацией о последней ошибке.
-
-### 1.2. Управление жизненным циклом HTTP-клиента
-
-Переиспользуемый HTTP-клиент должен иметь явно определённый жизненный цикл:
-
-- Адаптер обязан предоставлять асинхронный метод закрытия клиента (graceful close).
-- Этот метод должен вызываться в lifespan shutdown event приложения для корректного освобождения TCP-соединений и file descriptors.
-- При невозможности вызова метода закрытия (например, в тестах) — допускается создание нового HTTP-клиента на каждый запрос через контекстный менеджер.
+> **Implementation file:** `portkey_adapter.py`  
+> **Layer:** Infrastructure → Adapters  
+> **Responsibility:** Implementation of the `GatewayProvider` contract for the Portkey provider  
+> **Dependencies:** `httpx`, domain DTOs, `GatewayProvider` contract
 
 ---
 
-## 2. Свойство: provider_name
+## 1. General Rules
 
-- Возвращает строку `"portkey"`.
+- The `PortkeyAdapter` class implements the abstract `GatewayProvider` interface.
+- All HTTP calls are executed via `httpx.AsyncClient`.
+- Mandatory timeout on all requests: value from `EXTERNAL_HTTP_TIMEOUT` (default 30 sec).
+- Format transformation (Portkey ↔ DTO) occurs **exclusively** within this module.
+- Methods **never raise exceptions** to the caller — all errors are wrapped in `GatewayError`.
+
+### 1.1. Retry Policy
+
+All HTTP calls to the external API must use a retry mechanism with exponential backoff:
+
+- **Maximum attempts:** 3 (initial request + 2 retries).
+- **Delays between attempts:** 1 second, 2 seconds, 4 seconds (exponential growth).
+- **Retry conditions for GET requests:** transient errors — HTTP 502, 503, connection errors, timeouts.
+- **Retry conditions for POST/PUT/DELETE requests:** retry **only** on explicit HTTP 502 and 503 (not on timeouts and connection errors, as the request may have been partially processed).
+- **On exhausted attempts:** return `GatewayError` with information about the last error.
+
+### 1.2. HTTP Client Lifecycle Management
+
+The reusable HTTP client must have an explicitly defined lifecycle:
+
+- The adapter must provide an async method for graceful client closure.
+- This method must be called during the application's lifespan shutdown event for proper release of TCP connections and file descriptors.
+- When the close method cannot be called (e.g., in tests) — creating a new HTTP client per request via a context manager is acceptable.
 
 ---
 
-## 3. Метод: send_prompt
+## 2. Property: provider_name
 
-### Описание интерфейса
+- Returns the string `"portkey"`.
 
-- **Асинхронный метод**, принимающий три параметра: `prompt` (тип UnifiedPrompt), `api_key` (строка), `base_url` (строка).
-- **Возвращает:** UnifiedResponse при успехе или GatewayError при ошибке.
+---
 
-### Пошаговая логика
+## 3. Method: send_prompt
 
-1. **Формирование заголовков:**
-   - Заголовок с API-ключом Portkey (имя заголовка: `x-portkey-api-key`).
-   - Заголовок типа контента: `application/json`.
-   - Заголовок со сквозным идентификатором запроса (имя заголовка: `x-portkey-trace-id`) — для склейки с вебхуками.
-   - Если список идентификаторов Guardrail в промпте не пуст → добавить заголовок `x-portkey-guardrails` со списком ID в формате JSON-массива.
+### Interface Description
 
-2. **Формирование тела запроса:**
-   - Тело запроса — JSON-объект, содержащий: идентификатор модели из промпта, массив сообщений (каждое с полями роли и содержимого), температуру (если задана), максимальное количество токенов (если задано), метаданные (включая trace_id и произвольные метаданные из промпта).
+- **Async method** accepting three parameters: `prompt` (type UnifiedPrompt), `api_key` (string), `base_url` (string).
+- **Returns:** UnifiedResponse on success or GatewayError on error.
 
-3. **Отправка POST-запроса:**
+### Step-by-Step Logic
+
+1. **Build headers:**
+   - Portkey API key header (header name: `x-portkey-api-key`).
+   - Content type header: `application/json`.
+   - Request correlation identifier header (header name: `x-portkey-trace-id`) — for linking with webhooks.
+   - If the Guardrail identifier list in the prompt is not empty → add header `x-portkey-guardrails` with the ID list in JSON array format.
+
+2. **Build request body:**
+   - Request body — a JSON object containing: model identifier from the prompt, message array (each with role and content fields), temperature (if provided), maximum token count (if provided), metadata (including trace_id and arbitrary metadata from the prompt).
+
+3. **Send POST request:**
    - URL: `{base_url}/chat/completions`
-   - Таймаут: `EXTERNAL_HTTP_TIMEOUT` секунд.
+   - Timeout: `EXTERNAL_HTTP_TIMEOUT` seconds.
 
-4. **Обработка успешного ответа (HTTP 200):**
-   - Извлечь `choices[0].message.content` → `content`.
-   - Извлечь `model` → `model`.
-   - Извлечь `usage` → `UsageInfo` (если присутствует).
-   - Проверить наличие флага блокировки Guardrail в ответе.
-   - Собрать `UnifiedResponse`.
+4. **Handle successful response (HTTP 200):**
+   - Extract `choices[0].message.content` → `content`.
+   - Extract `model` → `model`.
+   - Extract `usage` → `UsageInfo` (if present).
+   - Check for Guardrail block flag in the response.
+   - Assemble `UnifiedResponse`.
 
-5. **Обработка ошибок:**
+5. **Error handling:**
 
-   | HTTP-статус | Код GatewayError    | Описание                          |
+   | HTTP Status | GatewayError Code   | Description                       |
    |-------------|---------------------|-----------------------------------|
-   | 401, 403    | `AUTH_FAILED`       | Невалидный API-ключ               |
-   | 429         | `RATE_LIMITED`      | Превышен лимит запросов           |
-   | 400         | `VALIDATION_ERROR`  | Невалидный запрос                 |
-   | 500+        | `PROVIDER_ERROR`    | Внутренняя ошибка Portkey         |
-   | Таймаут     | `TIMEOUT`           | Превышен таймаут ожидания         |
-   | Иное        | `UNKNOWN`           | Неизвестная ошибка                |
+   | 401, 403    | `AUTH_FAILED`       | Invalid API key                   |
+   | 429         | `RATE_LIMITED`      | Request rate limit exceeded       |
+   | 400         | `VALIDATION_ERROR`  | Invalid request                   |
+   | 500+        | `PROVIDER_ERROR`    | Internal Portkey error            |
+   | Timeout     | `TIMEOUT`           | Response timeout exceeded         |
+   | Other       | `UNKNOWN`           | Unknown error                     |
 
 ---
 
-## 4. Метод: create_guardrail
+## 4. Method: create_guardrail
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий три параметра: `config` (словарь с конфигурацией Guardrail), `api_key` (строка), `base_url` (строка).
-- **Возвращает:** словарь с ключом `remote_id` при успехе или GatewayError при ошибке.
+- **Async method** accepting three parameters: `config` (dict with Guardrail configuration), `api_key` (string), `base_url` (string).
+- **Returns:** dict with key `remote_id` on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Формирование заголовков:**
+1. **Build headers:**
    - `x-portkey-api-key: {api_key}`
    - `Content-Type: application/json`
 
-2. **Отправка POST-запроса:**
+2. **Send POST request:**
    - URL: `{base_url}/guardrails`
-   - Тело: `config` (JSON-конфигурация Guardrail как есть).
+   - Body: `config` (Guardrail JSON configuration as-is).
 
-3. **Обработка успешного ответа:**
-   - Извлечь `id` из ответа → это `remote_id`.
-   - Вернуть `{"remote_id": id, "raw_response": response_body}`.
+3. **Handle successful response:**
+   - Extract `id` from response → this is the `remote_id`.
+   - Return `{"remote_id": id, "raw_response": response_body}`.
 
-4. **Обработка ошибок:** аналогично `send_prompt`.
+4. **Error handling:** same as `send_prompt`.
 
 ---
 
-## 5. Метод: update_guardrail
+## 5. Method: update_guardrail
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий четыре параметра: `remote_id` (строка — идентификатор политики на стороне вендора), `config` (словарь с новой конфигурацией), `api_key` (строка), `base_url` (строка).
-- **Возвращает:** словарь с обновлёнными метаданными при успехе или GatewayError при ошибке.
+- **Async method** accepting four parameters: `remote_id` (string — vendor-side policy identifier), `config` (dict with new configuration), `api_key` (string), `base_url` (string).
+- **Returns:** dict with updated metadata on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Отправка PUT-запроса:**
+1. **Send PUT request:**
    - URL: `{base_url}/guardrails/{remote_id}`
-   - Тело: `config`.
+   - Body: `config`.
 
-2. **Обработка ответа:** аналогично `create_guardrail`.
+2. **Response handling:** same as `create_guardrail`.
 
 ---
 
-## 6. Метод: delete_guardrail
+## 6. Method: delete_guardrail
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий три параметра: `remote_id` (строка), `api_key` (строка), `base_url` (строка).
-- **Возвращает:** булево True при успехе или GatewayError при ошибке.
+- **Async method** accepting three parameters: `remote_id` (string), `api_key` (string), `base_url` (string).
+- **Returns:** boolean True on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Отправка DELETE-запроса:**
+1. **Send DELETE request:**
    - URL: `{base_url}/guardrails/{remote_id}`
 
-2. **Обработка ответа:**
-   - HTTP 200/204 → вернуть `True`.
-   - Иначе → `GatewayError`.
+2. **Response handling:**
+   - HTTP 200/204 → return `True`.
+   - Otherwise → `GatewayError`.
 
 ---
 
-## 7. Метод: list_guardrails
+## 7. Method: list_guardrails
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий два параметра: `api_key` (строка), `base_url` (строка).
-- **Возвращает:** список словарей при успехе или GatewayError при ошибке.
+- **Async method** accepting two parameters: `api_key` (string), `base_url` (string).
+- **Returns:** list of dicts on success or GatewayError on error.
 
-### Пошаговая логика
+### Step-by-Step Logic
 
-1. **Отправка GET-запроса:**
+1. **Send GET request:**
    - URL: `{base_url}/guardrails`
 
-2. **Обработка ответа:**
-   - Извлечь массив политик из тела ответа.
-   - Для каждой политики вернуть словарь с ключами: `remote_id`, `name`, `config`.
+2. **Response handling:**
+   - Extract the policy array from the response body.
+   - For each policy, return a dict with keys: `remote_id`, `name`, `config`.
 
 ---
 
-## 8. Внутренние вспомогательные методы
+## 8. Internal Helper Methods
 
 ### 8.1. `_build_headers(api_key: str) -> dict`
 
-Формирует стандартный набор HTTP-заголовков для Portkey API.
+Builds the standard set of HTTP headers for the Portkey API.
 
 ### 8.2. `_handle_error(exc: Exception, trace_id: str | None) -> GatewayError`
 
-Преобразует любое исключение (`httpx.TimeoutException`, `httpx.HTTPStatusError`, и т.д.)
-в соответствующий `GatewayError` с правильным кодом ошибки.
+Converts any exception (`httpx.TimeoutException`, `httpx.HTTPStatusError`, etc.)
+into the corresponding `GatewayError` with the correct error code.
 
 ### 8.3. `_get_http_client() -> httpx.AsyncClient`
 
-Создаёт или возвращает переиспользуемый `httpx.AsyncClient` с настроенным таймаутом. Клиент хранится как атрибут экземпляра адаптера и переиспользуется между вызовами.
+Creates or returns a reusable `httpx.AsyncClient` with a configured timeout. The client is stored as an adapter instance attribute and reused between calls.
 
 ### 8.4. `async close() -> None`
 
-Корректно закрывает переиспользуемый HTTP-клиент, освобождая TCP-соединения и file descriptors. Должен вызываться при остановке приложения (lifespan shutdown event). После вызова адаптер не должен использоваться для HTTP-запросов без повторной инициализации клиента.
+Gracefully closes the reusable HTTP client, releasing TCP connections and file descriptors. Must be called during application shutdown (lifespan shutdown event). After calling, the adapter should not be used for HTTP requests without reinitializing the client.
 
 ### 8.5. `_execute_with_retry(method, url, ...) -> httpx.Response`
 
-Внутренний метод, реализующий политику повторных попыток (см. раздел 1.1). Принимает HTTP-метод, URL и параметры запроса. Выполняет запрос с retry-логикой в соответствии с правилами для данного HTTP-метода. При исчерпании попыток — выбрасывает последнее полученное исключение для обработки в вызывающем методе.
+Internal method implementing the retry policy (see section 1.1). Accepts the HTTP method, URL, and request parameters. Executes the request with retry logic according to the rules for the given HTTP method. On exhausted attempts — raises the last received exception for handling in the calling method.
 
 ---
 
-## 9. Обработка ошибок (сводная таблица)
+## 9. Error Handling (Summary Table)
 
-| Исключение httpx              | Код GatewayError    | HTTP-статус |
-|-------------------------------|---------------------|-------------|
-| `httpx.TimeoutException`      | `TIMEOUT`           | 504         |
-| `httpx.ConnectError`          | `PROVIDER_ERROR`    | 502         |
-| `httpx.HTTPStatusError` (4xx) | зависит от статуса  | оригинальный|
-| `httpx.HTTPStatusError` (5xx) | `PROVIDER_ERROR`    | 502         |
-| `json.JSONDecodeError`        | `PROVIDER_ERROR`    | 502         |
-| Любое другое `Exception`      | `UNKNOWN`           | 500         |
+| httpx Exception                 | GatewayError Code   | HTTP Status |
+|---------------------------------|---------------------|-------------|
+| `httpx.TimeoutException`        | `TIMEOUT`           | 504         |
+| `httpx.ConnectError`            | `PROVIDER_ERROR`    | 502         |
+| `httpx.HTTPStatusError` (4xx)   | depends on status   | original    |
+| `httpx.HTTPStatusError` (5xx)   | `PROVIDER_ERROR`    | 502         |
+| `json.JSONDecodeError`          | `PROVIDER_ERROR`    | 502         |
+| Any other `Exception`           | `UNKNOWN`           | 500         |

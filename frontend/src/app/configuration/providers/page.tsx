@@ -24,6 +24,7 @@ import {
     Globe,
     Key,
     AlertTriangle,
+    Power,
 } from "lucide-react";
 import { api, type Provider, type ProviderCreateRequest } from "@/lib/api-client";
 
@@ -107,6 +108,15 @@ export default function ProvidersPage() {
         }
     };
 
+    const handleToggle = async (id: number) => {
+        try {
+            await api.toggleProvider(id);
+            fetchProviders();
+        } catch {
+            // silently fail
+        }
+    };
+
     return (
         <div className="space-y-6 animate-fade-in">
             <div className="flex items-center justify-between">
@@ -147,16 +157,22 @@ export default function ProvidersPage() {
                     providers.map((provider) => (
                         <Card
                             key={provider.id}
-                            className="hover:border-primary/30 transition-colors group"
+                            className={`transition-colors group ${
+                                provider.is_active
+                                    ? "hover:border-primary/30"
+                                    : "opacity-60 border-dashed"
+                            }`}
                         >
                             <CardHeader className="pb-3">
                                 <div className="flex items-start justify-between">
                                     <div className="flex items-center gap-3">
-                                        <div className="p-2 rounded-lg bg-primary/10">
-                                            <Zap className="w-5 h-5 text-primary" />
+                                        <div className={`p-2 rounded-lg ${provider.is_active ? "bg-primary/10" : "bg-muted"}`}>
+                                            <Zap className={`w-5 h-5 ${provider.is_active ? "text-primary" : "text-muted-foreground"}`} />
                                         </div>
                                         <div>
-                                            <CardTitle className="text-base">{provider.name}</CardTitle>
+                                            <CardTitle className={`text-base ${!provider.is_active ? "text-muted-foreground" : ""}`}>
+                                                {provider.name}
+                                            </CardTitle>
                                             <Badge
                                                 variant={provider.is_active ? "success" : "secondary"}
                                                 className="mt-1"
@@ -165,11 +181,24 @@ export default function ProvidersPage() {
                                             </Badge>
                                         </div>
                                     </div>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    <div className="flex gap-1">
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="h-8 w-8"
+                                            className={`h-8 w-8 ${
+                                                provider.is_active
+                                                    ? "text-green-600 hover:text-red-600"
+                                                    : "text-muted-foreground hover:text-green-600"
+                                            }`}
+                                            onClick={() => handleToggle(provider.id)}
+                                            title={provider.is_active ? "Deactivate provider" : "Activate provider"}
+                                        >
+                                            <Power className="w-4 h-4" />
+                                        </Button>
+                                        <Button
+                                            variant="ghost"
+                                            size="icon"
+                                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
                                             onClick={() => openEdit(provider)}
                                         >
                                             <Pencil className="w-3.5 h-3.5" />
@@ -177,7 +206,7 @@ export default function ProvidersPage() {
                                         <Button
                                             variant="ghost"
                                             size="icon"
-                                            className="h-8 w-8 text-destructive"
+                                            className="h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
                                             onClick={() => setDeleteConfirm(provider.id)}
                                         >
                                             <Trash2 className="w-3.5 h-3.5" />

@@ -2,7 +2,7 @@
 Тесты для GET /api/logs/{trace_id} и маршрутизации.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md
+Specification: app/api/routes/logs_spec.md
 """
 
 import pytest
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 
 class TestGetLogsByTraceId:
-    """Тесты для GET /api/logs/{trace_id}."""
+    """Tests for GET /api/logs/{trace_id}."""
 
     def test_get_logs_by_trace_id_returns_200(
         self, client: TestClient, mock_log_service: MagicMock, auth_headers: dict
@@ -98,7 +98,7 @@ class TestRouteOrdering:
 
 
 class TestGetLogsTraceIdFilter:
-    """Тесты для нового параметра trace_id в GET /api/logs/ (upgrade spec §1)."""
+    """Tests for нового параметра trace_id в GET /api/logs/ (upgrade spec §1)."""
 
     def test_get_logs_with_valid_trace_id_uuid(
         self, client: TestClient, mock_log_service: MagicMock, auth_headers: dict

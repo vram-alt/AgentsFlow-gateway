@@ -18,8 +18,9 @@ import {
     X,
     Loader2,
     FileText,
+    AlertTriangle,
 } from "lucide-react";
-import { api, type LogEntry } from "@/lib/api-client";
+import { api, ApiError, type LogEntry } from "@/lib/api-client";
 
 const EVENT_TYPES = [
     { value: "", label: "All Events" },
@@ -38,18 +39,34 @@ const eventTypeColor: Record<string, string> = {
     webhook_received: "bg-primary/20 text-primary",
 };
 
+/** Extract a human-readable message from any caught error. */
+function humanError(err: unknown): string {
+    if (err instanceof ApiError) return err.message;
+    if (err instanceof TypeError) {
+        if (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed")) {
+            return "Network error — unable to reach the server. Please check your connection and try again.";
+        }
+        return `Unexpected client error: ${err.message}`;
+    }
+    if (err instanceof Error) return err.message;
+    return "An unexpected error occurred. Please try again later.";
+}
+
 export default function ObservabilityPage() {
     const [logs, setLogs] = useState<LogEntry[]>([]);
     const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
     const [page, setPage] = useState(0);
     const [eventType, setEventType] = useState("");
     const [traceIdFilter, setTraceIdFilter] = useState("");
     const [selectedLog, setSelectedLog] = useState<LogEntry | null>(null);
     const [replayLoading, setReplayLoading] = useState<number | null>(null);
-    const pageSize = 50;
+    const [replayError, setReplayError] = useState<string | null>(null);
+    const pageSize = 8;
 
     const fetchLogs = useCallback(async () => {
         setLoading(true);
+        setError(null);
         try {
             const data = await api.getLogs({
                 limit: pageSize,
@@ -58,8 +75,9 @@ export default function ObservabilityPage() {
                 trace_id: traceIdFilter || undefined,
             });
             setLogs(Array.isArray(data) ? data : []);
-        } catch {
+        } catch (err: unknown) {
             setLogs([]);
+            setError(humanError(err));
         } finally {
             setLoading(false);
         }
@@ -71,18 +89,28 @@ export default function ObservabilityPage() {
 
     const handleReplay = async (logId: number) => {
         setReplayLoading(logId);
+        setReplayError(null);
         try {
             await api.replayLog(logId);
-        } catch {
-            // silently fail
+        } catch (err: unknown) {
+            setReplayError(humanError(err));
         } finally {
             setReplayLoading(null);
         }
     };
 
-    const handleExport = () => {
-        const url = api.exportLogs({ event_type: eventType || undefined });
-        window.open(url, "_blank");
+    const [exportLoading, setExportLoading] = useState(false);
+
+    const handleExport = async () => {
+        setExportLoading(true);
+        setError(null);
+        try {
+            await api.downloadExportCsv({ event_type: eventType || undefined });
+        } catch (err: unknown) {
+            setError(humanError(err));
+        } finally {
+            setExportLoading(false);
+        }
     };
 
     return (
@@ -94,8 +122,12 @@ export default function ObservabilityPage() {
                     <p className="text-muted-foreground">Request logs and event tracing</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={handleExport}>
-                        <Download className="w-4 h-4 mr-2" />
+                    <Button variant="outline" size="sm" onClick={handleExport} disabled={exportLoading}>
+                        {exportLoading ? (
+                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        ) : (
+                            <Download className="w-4 h-4 mr-2" />
+                        )}
                         Export CSV
                     </Button>
                     <Button variant="outline" size="sm" onClick={fetchLogs} disabled={loading}>
@@ -104,6 +136,34 @@ export default function ObservabilityPage() {
                     </Button>
                 </div>
             </div>
+
+            {/* Error Banner */}
+            {error && (
+                <div className="flex items-center gap-3 p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <p className="text-sm font-medium">{error}</p>
+                    <button
+                        onClick={() => setError(null)}
+                        className="ml-auto p-1 rounded hover:bg-destructive/20 cursor-pointer"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
+            {/* Replay Error Banner */}
+            {replayError && (
+                <div className="flex items-center gap-3 p-4 rounded-lg border border-warning/50 bg-warning/10 text-warning">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <p className="text-sm font-medium">Replay failed: {replayError}</p>
+                    <button
+                        onClick={() => setReplayError(null)}
+                        className="ml-auto p-1 rounded hover:bg-warning/20 cursor-pointer"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
 
             {/* Filters */}
             <Card>

@@ -1,11 +1,11 @@
 """
-Модульные тесты для ChatService — оркестратора чата.
-Спецификация: app/services/chat_service_spec.md
+Unit tests for ChatService — оркестратора чата.
+Specification: app/services/chat_service_spec.md
 
-TDD Red-фаза: все тесты должны падать с ImportError,
-пока ChatService не реализован (chat_service.py содержит только # Placeholder).
+TDD Red phase: all tests should fail with ImportError,
+until ChatService is not implemented (chat_service.py содержит только # Placeholder).
 
-Все зависимости (ProviderRepository, LogService, GatewayProvider) — строго замоканы.
+All dependencies (ProviderRepository, LogService, GatewayProvider) — are strictly mocked.
 """
 
 from __future__ import annotations
@@ -15,17 +15,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ── Импорт тестируемого класса (должен упасть на Red-фазе) ──────────────
+# ── Import tested class (should fail during Red phase) ──────────────
 from app.services.chat_service import ChatService
 
-# ── Импорт доменных объектов (уже реализованы) ──────────────────────────
+# ── Импорт доменных объектов (already implemented) ──────────────────────────
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.dto.unified_prompt import MessageItem, UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse, UsageInfo
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Константы для тестов
+# Constants для тестов
 # ═══════════════════════════════════════════════════════════════════════════
 
 VALID_TRACE_ID = "123e4567-e89b-42d3-a456-426614174000"
@@ -37,13 +37,13 @@ SAMPLE_PROVIDER_NAME = "portkey"
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def mock_provider_repo():
-    """Мок ProviderRepository с async-методами."""
+    """Mock ProviderRepository with async methods."""
     repo = AsyncMock()
     # По умолчанию: провайдер найден и активен
     provider_record = MagicMock()
@@ -57,7 +57,7 @@ def mock_provider_repo():
 
 @pytest.fixture
 def mock_log_service():
-    """Мок LogService с async-методами."""
+    """Mock LogService with async methods."""
     svc = AsyncMock()
     svc.log_chat_request = AsyncMock(return_value=None)
     return svc
@@ -68,7 +68,7 @@ def mock_adapter():
     """Мок GatewayProvider (адаптер) с async-методами."""
     adapter = AsyncMock()
     adapter.provider_name = SAMPLE_PROVIDER_NAME
-    # По умолчанию: успешный ответ
+    # Default: successful response
     adapter.send_prompt = AsyncMock(
         return_value=UnifiedResponse(
             trace_id=VALID_TRACE_ID,
@@ -82,7 +82,7 @@ def mock_adapter():
 
 @pytest.fixture
 def service(mock_provider_repo, mock_log_service, mock_adapter):
-    """Экземпляр ChatService с замоканными зависимостями."""
+    """Instance of ChatService with mocked dependencies."""
     return ChatService(
         provider_repo=mock_provider_repo,
         log_service=mock_log_service,
@@ -102,17 +102,17 @@ def sample_unified_response():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 1. Конструктор (спецификация §2)
+# 1. Конструктор (specification §2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestChatServiceConstructor:
-    """Тесты конструктора ChatService (спецификация §2)."""
+    """Constructor tests for ChatService (specification §2)."""
 
     def test_constructor_accepts_all_dependencies(
         self, mock_provider_repo, mock_log_service, mock_adapter
     ):
-        """ChatService принимает provider_repo, log_service, adapter."""
+        """ChatService accepts provider_repo, log_service, adapter."""
         svc = ChatService(
             provider_repo=mock_provider_repo,
             log_service=mock_log_service,
@@ -123,7 +123,7 @@ class TestChatServiceConstructor:
     def test_constructor_stores_provider_repo(
         self, mock_provider_repo, mock_log_service, mock_adapter
     ):
-        """Зависимость provider_repo сохраняется как атрибут."""
+        """Dependency provider_repo сохраняется как атрибут."""
         svc = ChatService(
             provider_repo=mock_provider_repo,
             log_service=mock_log_service,
@@ -134,7 +134,7 @@ class TestChatServiceConstructor:
     def test_constructor_stores_log_service(
         self, mock_provider_repo, mock_log_service, mock_adapter
     ):
-        """Зависимость log_service сохраняется как атрибут."""
+        """Dependency log_service сохраняется как атрибут."""
         svc = ChatService(
             provider_repo=mock_provider_repo,
             log_service=mock_log_service,
@@ -145,7 +145,7 @@ class TestChatServiceConstructor:
     def test_constructor_stores_adapter(
         self, mock_provider_repo, mock_log_service, mock_adapter
     ):
-        """Зависимость adapter сохраняется как атрибут."""
+        """Dependency adapter сохраняется как атрибут."""
         svc = ChatService(
             provider_repo=mock_provider_repo,
             log_service=mock_log_service,
@@ -185,7 +185,7 @@ class TestSendChatMessageHappyPath:
 
     @pytest.mark.asyncio
     async def test_default_provider_name_is_portkey(self, service, mock_provider_repo):
-        """provider_name по умолчанию = 'portkey' (спецификация §3)."""
+        """provider_name по умолчанию = 'portkey' (specification §3)."""
         await service.send_chat_message(
             model=SAMPLE_MODEL,
             messages=SAMPLE_MESSAGES,
@@ -205,7 +205,7 @@ class TestSendChatMessageHappyPath:
     async def test_adapter_receives_correct_api_key_and_base_url(
         self, service, mock_adapter
     ):
-        """adapter.send_prompt получает api_key и base_url из записи провайдера."""
+        """adapter.send_prompt получает api_key и base_url из записи a provider."""
         await service.send_chat_message(
             model=SAMPLE_MODEL,
             messages=SAMPLE_MESSAGES,
@@ -313,7 +313,7 @@ class TestSendChatMessageHappyPath:
 
     @pytest.mark.asyncio
     async def test_prompt_temperature_none_by_default(self, service, mock_adapter):
-        """temperature по умолчанию None."""
+        """temperature defaults to None."""
         await service.send_chat_message(
             model=SAMPLE_MODEL,
             messages=SAMPLE_MESSAGES,
@@ -323,7 +323,7 @@ class TestSendChatMessageHappyPath:
 
     @pytest.mark.asyncio
     async def test_prompt_max_tokens_none_by_default(self, service, mock_adapter):
-        """max_tokens по умолчанию None."""
+        """max_tokens defaults to None."""
         await service.send_chat_message(
             model=SAMPLE_MODEL,
             messages=SAMPLE_MESSAGES,
@@ -385,18 +385,18 @@ class TestSendChatMessageHappyPath:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. Провайдер не найден / деактивирован (спецификация §4, AUTH_FAILED)
+# 3. Провайдер не найден / деактивирован (specification §4, AUTH_FAILED)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestSendChatMessageProviderNotFound:
-    """Провайдер не найден или деактивирован → GatewayError(AUTH_FAILED)."""
+    """Provider not found или деактивирован → GatewayError(AUTH_FAILED)."""
 
     @pytest.mark.asyncio
     async def test_returns_gateway_error_when_provider_not_found(
         self, service, mock_provider_repo
     ):
-        """Если provider_repo.get_active_by_name вернул None → GatewayError."""
+        """If provider_repo.get_active_by_name вернул None → GatewayError."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         result = await service.send_chat_message(
@@ -409,7 +409,7 @@ class TestSendChatMessageProviderNotFound:
     async def test_error_code_is_auth_failed_when_provider_not_found(
         self, service, mock_provider_repo
     ):
-        """error_code = 'AUTH_FAILED' при отсутствии провайдера."""
+        """error_code = 'AUTH_FAILED' при отсутствии a provider."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         result = await service.send_chat_message(
@@ -434,7 +434,7 @@ class TestSendChatMessageProviderNotFound:
     async def test_adapter_not_called_when_provider_not_found(
         self, service, mock_provider_repo, mock_adapter
     ):
-        """Адаптер НЕ вызывается, если провайдер не найден."""
+        """Адаптер НЕ вызывается, if provider not found."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         await service.send_chat_message(
@@ -447,7 +447,7 @@ class TestSendChatMessageProviderNotFound:
     async def test_log_service_called_on_provider_not_found(
         self, service, mock_provider_repo, mock_log_service
     ):
-        """Логирование вызывается даже при отсутствии провайдера."""
+        """Логирование вызывается даже при отсутствии a provider."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         await service.send_chat_message(
@@ -470,7 +470,7 @@ class TestSendChatMessageProviderNotFound:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. Ошибка БД при получении провайдера (спецификация §4, UNKNOWN)
+# 4. Ошибка БД при получении провайдера (specification §4, UNKNOWN)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -520,7 +520,7 @@ class TestSendChatMessageProviderDbError:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. Адаптер вернул GatewayError (спецификация §4, проброс ошибки)
+# 5. Адаптер вернул GatewayError (specification §4, проброс ошибки)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -542,7 +542,7 @@ class TestSendChatMessageAdapterReturnsError:
     async def test_returns_gateway_error_from_adapter(
         self, service, mock_adapter, adapter_error
     ):
-        """Если адаптер вернул GatewayError, он пробрасывается как есть."""
+        """If адаптер вернул GatewayError, он пробрасывается как есть."""
         mock_adapter.send_prompt.return_value = adapter_error
 
         result = await service.send_chat_message(
@@ -580,7 +580,7 @@ class TestSendChatMessageAdapterReturnsError:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 6. Адаптер выбросил исключение (спецификация §4, UNKNOWN)
+# 6. Адаптер выбросил исключение (specification §4, UNKNOWN)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -642,7 +642,7 @@ class TestSendChatMessageAdapterException:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. Логирование не блокирует ответ (спецификация §3.5, §4)
+# 7. Логирование не блокирует ответ (specification §3.5, §4)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -692,7 +692,7 @@ class TestLoggingDoesNotBlockResponse:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 8. Порядок вызовов оркестрации (спецификация §3)
+# 8. Порядок вызовов оркестрации (specification §3)
 # ═══════════════════════════════════════════════════════════════════════════
 
 

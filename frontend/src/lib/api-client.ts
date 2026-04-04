@@ -3,14 +3,70 @@
  * All 22 endpoints covered.
  */
 
+import { getStoredAuthToken } from "@/lib/auth-context";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
-// ─── Auth header ────────────────────────────────────────────────────────
+// ─── Auth header (HTTP Basic Auth) ──────────────────────────────────────
 function getHeaders(): HeadersInit {
+    const token = getStoredAuthToken();
+    if (token) {
+        return {
+            "Content-Type": "application/json",
+            Authorization: `Basic ${token}`,
+        };
+    }
+    // Fallback to env vars (for SSR or when not logged in yet)
+    const username = process.env.NEXT_PUBLIC_ADMIN_USERNAME || "gateway_operator";
+    const password = process.env.NEXT_PUBLIC_ADMIN_PASSWORD || "Str0ng!Pass#2024";
+    const encoded = typeof btoa === "function"
+        ? btoa(`${username}:${password}`)
+        : Buffer.from(`${username}:${password}`).toString("base64");
     return {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${process.env.NEXT_PUBLIC_API_TOKEN || "dev-token"}`,
+        Authorization: `Basic ${encoded}`,
     };
+}
+
+// ─── Human-readable error messages ──────────────────────────────────────
+function formatErrorMessage(status: number, detail: string, errorCode: string): string {
+    // If backend returned a detailed message, prefer it (it's already human-readable)
+    if (detail && detail.length > 20) {
+        return detail;
+    }
+
+    // Map error codes from backend to readable messages
+    const codeMessages: Record<string, string> = {
+        AUTH_FAILED: "Authentication failed — provider not found or invalid API key",
+        VALIDATION_ERROR: "Validation error — check your input data",
+        RATE_LIMITED: "Rate limit exceeded — too many requests, please wait and try again",
+        TIMEOUT: "Request timed out — the provider did not respond in time",
+        PROVIDER_ERROR: "External provider error — the service returned an unexpected response",
+        INTERNAL_ERROR: "Internal server error — please try again later",
+        UNKNOWN: "An unexpected error occurred",
+    };
+
+    if (errorCode && codeMessages[errorCode]) {
+        return detail ? `${codeMessages[errorCode]}: ${detail}` : codeMessages[errorCode];
+    }
+
+    // Map HTTP status codes to readable messages
+    const statusMessages: Record<number, string> = {
+        400: "Bad request — check your input data",
+        401: "Authentication failed — check your username and password",
+        403: "Access denied — you don't have permission for this action",
+        404: "Resource not found",
+        409: "Conflict — this resource already exists",
+        422: "Validation error — check the format of your data",
+        429: "Too many requests — please wait and try again",
+        500: "Internal server error — please try again later",
+        502: "External provider error",
+        503: "Service temporarily unavailable — please try again later",
+        504: "Request timed out — the provider did not respond in time",
+    };
+
+    const base = statusMessages[status] || `Error ${status}`;
+    return detail ? `${base}: ${detail}` : base;
 }
 
 // ─── Generic fetch wrapper ──────────────────────────────────────────────
@@ -29,7 +85,30 @@ async function apiFetch<T>(
 
     if (!res.ok) {
         const body = await res.json().catch(() => ({ message: res.statusText }));
-        throw new ApiError(res.status, body.message || body.detail || res.statusText, body);
+
+        // Normalize detail: backend may return a string (custom handler)
+        // or an array of Pydantic error objects (fallback/default handler).
+        let rawDetail = body.message || body.detail || "";
+        if (Array.isArray(rawDetail)) {
+            // Convert array of Pydantic error objects to readable text
+            rawDetail = rawDetail
+                .map((err: { loc?: string[]; msg?: string }) => {
+                    const loc = (err.loc || [])
+                        .filter((p: string) => p !== "body")
+                        .join(" → ");
+                    const msg = err.msg || "invalid value";
+                    return loc ? `${loc}: ${msg}` : msg;
+                })
+                .join("; ");
+        } else if (typeof rawDetail === "object" && rawDetail !== null) {
+            // Safety: if detail is some other object, stringify it
+            rawDetail = JSON.stringify(rawDetail);
+        }
+
+        const detail = String(rawDetail);
+        const errorCode = body.error_code || "";
+        const humanMessage = formatErrorMessage(res.status, detail, errorCode);
+        throw new ApiError(res.status, humanMessage, body);
     }
 
     // Handle empty responses (204, etc.)
@@ -150,13 +229,15 @@ export interface StatsSummary {
     error_rate: number;
     top_models: Array<{ model: string; count: number }>;
     top_providers: Array<{ provider: string; count: number }>;
+    // Legacy fields from backend
+    total?: number;
+    chat_requests?: number;
+    guardrail_incidents?: number;
+    system_errors?: number;
+    total_tokens?: number;
 }
 
-export interface ChartData {
-    hourly_requests: Array<{ hour: string; count: number }>;
-    hourly_errors: Array<{ hour: string; count: number }>;
-    hourly_latency: Array<{ hour: string; avg_ms: number }>;
-}
+export type ChartData = Array<{ hour: string; count: number }>;
 
 export interface TesterProxyRequest {
     provider_name: string;
@@ -214,6 +295,10 @@ export const api = {
         apiFetch<{ status: string }>(`/api/providers/${id}`, {
             method: "DELETE",
         }),
+    toggleProvider: (id: number) =>
+        apiFetch<Provider>(`/api/providers/${id}/toggle`, {
+            method: "PATCH",
+        }),
     getProvidersHealth: () =>
         apiFetch<ProviderHealth[]>("/api/providers/health"),
 
@@ -232,6 +317,10 @@ export const api = {
     deletePolicy: (id: number) =>
         apiFetch<{ status: string }>(`/api/policies/${id}`, {
             method: "DELETE",
+        }),
+    togglePolicy: (id: number) =>
+        apiFetch<Policy>(`/api/policies/${id}/toggle`, {
+            method: "PATCH",
         }),
     syncPolicies: (providerName: string = "portkey") =>
         apiFetch<unknown>("/api/policies/sync", {
@@ -261,12 +350,41 @@ export const api = {
         apiFetch<ChatResponse>(`/api/logs/${logId}/replay`, {
             method: "POST",
         }),
-    exportLogs: (params?: { event_type?: string; limit?: number }) => {
+    exportLogs: (params?: { event_type?: string; limit?: number }): string => {
         const searchParams = new URLSearchParams();
         if (params?.event_type) searchParams.set("event_type", params.event_type);
         if (params?.limit) searchParams.set("limit", String(params.limit));
         const qs = searchParams.toString();
         return `${API_BASE}/api/logs/export${qs ? `?${qs}` : ""}`;
+    },
+
+    /** Download CSV export with auth headers, returning a Blob. */
+    downloadExportCsv: async (params?: { event_type?: string; limit?: number }): Promise<void> => {
+        const searchParams = new URLSearchParams();
+        if (params?.event_type) searchParams.set("event_type", params.event_type);
+        if (params?.limit) searchParams.set("limit", String(params.limit));
+        const qs = searchParams.toString();
+        const url = `${API_BASE}/api/logs/export${qs ? `?${qs}` : ""}`;
+
+        const res = await fetch(url, {
+            headers: getHeaders(),
+        });
+
+        if (!res.ok) {
+            const body = await res.json().catch(() => ({ detail: res.statusText }));
+            const detail = body.detail || body.message || res.statusText;
+            throw new ApiError(res.status, formatErrorMessage(res.status, String(detail), ""), body);
+        }
+
+        const blob = await res.blob();
+        const blobUrl = window.URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = blobUrl;
+        a.download = "logs_export.csv";
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(blobUrl);
     },
 
     // Stats (Dashboard)
@@ -280,5 +398,13 @@ export const api = {
         apiFetch<TesterProxyResponse>("/api/tester/proxy", {
             method: "POST",
             body: JSON.stringify(data),
+        }),
+
+    // Settings
+    getDemoMode: () => apiFetch<{ enabled: boolean }>("/api/settings/demo-mode"),
+    setDemoMode: (enabled: boolean) =>
+        apiFetch<{ enabled: boolean; message: string }>("/api/settings/demo-mode", {
+            method: "PUT",
+            body: JSON.stringify({ enabled }),
         }),
 };

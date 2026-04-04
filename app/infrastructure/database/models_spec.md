@@ -1,84 +1,84 @@
-# Спецификация: ORM-модели SQLAlchemy (models.py)
+# Specification: SQLAlchemy ORM Models (models.py)
 
-> **Файл реализации:** `models.py`  
-> **Слой:** Infrastructure (внешний мир — I/O)  
-> **Ответственность:** Определение таблиц БД через декларативные ORM-модели SQLAlchemy 2.0
-
----
-
-## 1. Общие правила
-
-- Все операции с БД — **асинхронные** (через AsyncSession).
-- ORM-модели SQLAlchemy **не экспортируются** за пределы слоя infrastructure.
-- Все модели наследуются от единого декларативного базового класса (стиль SQLAlchemy 2.0+).
+> **Implementation file:** `models.py`  
+> **Layer:** Infrastructure (external world — I/O)  
+> **Responsibility:** Defining database tables via declarative SQLAlchemy 2.0 ORM models
 
 ---
 
-## 2. Базовый класс
+## 1. General Rules
 
-- Единый декларативный базовый класс для всех ORM-моделей (стиль SQLAlchemy 2.0+).
-- Все модели наследуются от этого базового класса.
+- All DB operations are **asynchronous** (via AsyncSession).
+- SQLAlchemy ORM models are **not exported** beyond the infrastructure layer.
+- All models inherit from a single declarative base class (SQLAlchemy 2.0+ style).
 
 ---
 
-## 3. Таблица: ProviderModel
+## 2. Base Class
 
-**Имя таблицы:** `providers`
+- A single declarative base class for all ORM models (SQLAlchemy 2.0+ style).
+- All models inherit from this base class.
 
-| Колонка      | Тип SQLAlchemy         | Ограничения                    | Описание                        |
+---
+
+## 3. Table: ProviderModel
+
+**Table name:** `providers`
+
+| Column       | SQLAlchemy Type        | Constraints                    | Description                     |
 |--------------|------------------------|--------------------------------|---------------------------------|
-| `id`         | `Integer`              | PK, autoincrement              | Первичный ключ                  |
-| `name`       | `String(100)`          | NOT NULL, UNIQUE               | Название провайдера             |
-| `api_key`    | `String(500)`          | NOT NULL                       | API-ключ (зашифрованный)        |
-| `base_url`   | `String(500)`          | NOT NULL                       | Базовый URL API                 |
-| `is_active`  | `Boolean`              | NOT NULL, default=True         | Флаг активности (Soft Delete)   |
-| `created_at` | `DateTime`             | NOT NULL, default=utcnow       | Дата создания                   |
-| `updated_at` | `DateTime`             | NOT NULL, default=utcnow, onupdate=utcnow | Дата обновления   |
+| `id`         | `Integer`              | PK, autoincrement              | Primary key                     |
+| `name`       | `String(100)`          | NOT NULL, UNIQUE               | Provider name                   |
+| `api_key`    | `String(500)`          | NOT NULL                       | API key (encrypted)             |
+| `base_url`   | `String(500)`          | NOT NULL                       | Base API URL                    |
+| `is_active`  | `Boolean`              | NOT NULL, default=True         | Activity flag (Soft Delete)     |
+| `created_at` | `DateTime`             | NOT NULL, default=utcnow       | Creation date                   |
+| `updated_at` | `DateTime`             | NOT NULL, default=utcnow, onupdate=utcnow | Update date       |
 
-**Шифрование колонки api_key:** Значение колонки api_key должно храниться в зашифрованном виде с использованием симметричного шифрования (алгоритм Fernet). Мастер-ключ шифрования читается из поля encryption_key класса Settings (переменная окружения ENCRYPTION_KEY, определена в config_spec.md). Механизм получения ключа в ORM-слое: импорт функции get_settings из модуля конфигурации. При записи в БД — значение шифруется, при чтении из БД — расшифровывается. Это предотвращает раскрытие всех API-ключей провайдеров при компрометации файла БД (SQLite) или SQL-инъекции.
+**api_key column encryption:** The api_key column value must be stored in encrypted form using symmetric encryption (Fernet algorithm). The master encryption key is read from the encryption_key field of the Settings class (ENCRYPTION_KEY environment variable, defined in config_spec.md). Mechanism for obtaining the key in the ORM layer: import the get_settings function from the configuration module. On DB write — the value is encrypted; on DB read — it is decrypted. This prevents disclosure of all provider API keys if the DB file (SQLite) is compromised or via SQL injection.
 
-**Связи:** policies → relationship к PolicyModel (one-to-many).
+**Relationships:** policies → relationship to PolicyModel (one-to-many).
 
 ---
 
-## 4. Таблица: PolicyModel
+## 4. Table: PolicyModel
 
-**Имя таблицы:** `policies`
+**Table name:** `policies`
 
-| Колонка       | Тип SQLAlchemy         | Ограничения                    | Описание                        |
+| Column        | SQLAlchemy Type        | Constraints                    | Description                     |
 |---------------|------------------------|--------------------------------|---------------------------------|
-| `id`          | `Integer`              | PK, autoincrement              | Первичный ключ                  |
-| `name`        | `String(200)`          | NOT NULL                       | Название политики               |
-| `body`        | `Text`                 | NOT NULL                       | JSON-тело правила (сериализованный dict) |
-| `remote_id`   | `String(200)`          | NULLABLE, UNIQUE               | ID политики на стороне вендора  |
-| `provider_id` | `Integer`              | FK → providers.id, ON DELETE SET NULL | Привязка к провайдеру    |
-| `is_active`   | `Boolean`              | NOT NULL, default=True         | Флаг активности (Soft Delete)   |
-| `created_at`  | `DateTime`             | NOT NULL, default=utcnow       | Дата создания                   |
-| `updated_at`  | `DateTime`             | NOT NULL, default=utcnow, onupdate=utcnow | Дата обновления   |
+| `id`          | `Integer`              | PK, autoincrement              | Primary key                     |
+| `name`        | `String(200)`          | NOT NULL                       | Policy name                     |
+| `body`        | `Text`                 | NOT NULL                       | JSON rule body (serialized dict)|
+| `remote_id`   | `String(200)`          | NULLABLE, UNIQUE               | Vendor-side policy ID           |
+| `provider_id` | `Integer`              | FK → providers.id, ON DELETE SET NULL | Provider association     |
+| `is_active`   | `Boolean`              | NOT NULL, default=True         | Activity flag (Soft Delete)     |
+| `created_at`  | `DateTime`             | NOT NULL, default=utcnow       | Creation date                   |
+| `updated_at`  | `DateTime`             | NOT NULL, default=utcnow, onupdate=utcnow | Update date       |
 
-**Примечание:** Поле body хранится как Text (JSON-строка). При миграции на PostgreSQL заменяется на JSONB.
+**Note:** The body field is stored as Text (JSON string). When migrating to PostgreSQL, it should be replaced with JSONB.
 
 ---
 
-## 5. Таблица: LogEntryModel
+## 5. Table: LogEntryModel
 
-**Имя таблицы:** `logs`
+**Table name:** `logs`
 
-| Колонка      | Тип SQLAlchemy         | Ограничения                    | Описание                        |
+| Column       | SQLAlchemy Type        | Constraints                    | Description                     |
 |--------------|------------------------|--------------------------------|---------------------------------|
-| `id`         | `Integer`              | PK, autoincrement              | Первичный ключ                  |
-| `trace_id`   | `String(36)`           | NOT NULL, INDEX                | UUID сквозного идентификатора   |
-| `event_type` | `String(50)`           | NOT NULL                       | Тип события (Enum как строка)   |
-| `payload`    | `Text`                 | NOT NULL                       | Полиморфное тело (JSON-строка)  |
-| `created_at` | `DateTime`             | NOT NULL, default=utcnow       | Дата создания                   |
+| `id`         | `Integer`              | PK, autoincrement              | Primary key                     |
+| `trace_id`   | `String(36)`           | NOT NULL, INDEX                | Correlation UUID                |
+| `event_type` | `String(50)`           | NOT NULL                       | Event type (Enum as string)     |
+| `payload`    | `Text`                 | NOT NULL                       | Polymorphic body (JSON string)  |
+| `created_at` | `DateTime`             | NOT NULL, default=utcnow       | Creation date                   |
 
-**Индексы:** ix_logs_trace_id на колонке trace_id для быстрого поиска по сквозному ID.
+**Indexes:** ix_logs_trace_id on the trace_id column for fast correlation ID lookups.
 
 ---
 
-## 6. Обработка ошибок
+## 6. Error Handling
 
-| Ситуация                        | Действие                                    |
+| Scenario                        | Action                                      |
 |---------------------------------|---------------------------------------------|
-| Дубликат UNIQUE-поля            | IntegrityError → пробрасывается в сервис    |
-| Невалидный JSON при сериализации| ValueError → пробрасывается в сервис        |
+| UNIQUE field duplicate          | IntegrityError → propagated to service      |
+| Invalid JSON on serialization   | ValueError → propagated to service          |

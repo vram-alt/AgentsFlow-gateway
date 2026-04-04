@@ -1,48 +1,48 @@
-# Спецификация: Доменная сущность Provider (provider.py)
+# Specification: Domain Entity Provider (provider.py)
 
-> **Файл реализации:** `provider.py`  
-> **Слой:** Domain (чистое ядро, 0 внешних зависимостей кроме Pydantic)  
-> **Ответственность:** Описание бизнес-сущности «Провайдер» — настройки доступа к внешнему LLM-провайдеру
-
----
-
-## 1. Общие правила
-
-- Модель наследуется от BaseModel (Pydantic).
-- Используется Pydantic V2 (конфигурация через ConfigDict).
-- Поля с датами имеют тип datetime. Значение по умолчанию задаётся через механизм фабрики (default_factory), которая вызывает получение текущего UTC-времени **при каждом создании экземпляра**, а не один раз при импорте модуля. Использовать timezone-aware вариант получения текущего времени (с явным указанием часового пояса UTC), т.к. вариант без timezone deprecated начиная с Python 3.12.
-- Булевы флаги активности по умолчанию True.
-- Модель **не содержит** логики работы с БД — это чистый доменный объект.
+> **Implementation file:** `provider.py`  
+> **Layer:** Domain (pure core, zero external dependencies except Pydantic)  
+> **Responsibility:** Describing the "Provider" business entity — access settings for an external LLM provider
 
 ---
 
-## 2. Сущность: Provider
+## 1. General Rules
 
-### Назначение
-
-Хранит учётные данные для подключения к внешнему LLM-провайдеру (на текущем этапе — Portkey).
-
-### Поля
-
-| Поле           | Тип              | Обязательное | По умолчанию     | Описание                                      |
-|----------------|------------------|--------------|------------------|-----------------------------------------------|
-| `id`           | целое или None   | Нет          | None             | Первичный ключ (назначается БД)               |
-| `name`         | строка           | Да           | —                | Уникальное название провайдера (например, "Portkey") |
-| `api_key`      | строка           | Да           | —                | API-ключ для аутентификации                   |
-| `base_url`     | строка           | Да           | —                | Базовый URL API провайдера                    |
-| `is_active`    | булево           | Нет          | True             | Флаг активности (Soft Delete)                 |
-| `created_at`   | datetime         | Нет          | текущее UTC-время (через фабрику) | Дата создания записи              |
-| `updated_at`   | datetime         | Нет          | текущее UTC-время (через фабрику) | Дата последнего обновления        |
-
-### Валидация
-
-- `name`: минимум 1 символ, максимум 100 символов, strip_whitespace=True.
-- `api_key`: минимум 1 символ (не пустая строка).
-- `base_url`: должен начинаться с "http://" или "https://".
+- The model inherits from BaseModel (Pydantic).
+- Uses Pydantic V2 (configuration via ConfigDict).
+- Date fields have type datetime. The default value is set via a factory mechanism (default_factory) that retrieves the current UTC time **on each instance creation**, not once at module import. Use the timezone-aware variant for obtaining the current time (with explicit UTC timezone), as the timezone-naive variant is deprecated starting with Python 3.12.
+- Boolean activity flags default to True.
+- The model **does not contain** database logic — it is a pure domain object.
 
 ---
 
-## 3. Обработка ошибок
+## 2. Entity: Provider
 
-Модель при невалидных данных выбрасывает стандартный pydantic.ValidationError.
-Никакой кастомной обработки ошибок на уровне сущности не предусмотрено — это ответственность вышестоящих слоёв (services, api).
+### Purpose
+
+Stores credentials for connecting to an external LLM provider (currently — Portkey).
+
+### Fields
+
+| Field          | Type             | Required | Default          | Description                                   |
+|----------------|------------------|----------|------------------|-----------------------------------------------|
+| `id`           | int or None      | No       | None             | Primary key (assigned by DB)                  |
+| `name`         | string           | Yes      | —                | Unique provider name (e.g., "Portkey")        |
+| `api_key`      | string           | Yes      | —                | API key for authentication                    |
+| `base_url`     | string           | Yes      | —                | Base URL of the provider API                  |
+| `is_active`    | boolean          | No       | True             | Activity flag (Soft Delete)                   |
+| `created_at`   | datetime         | No       | current UTC time (via factory) | Record creation timestamp     |
+| `updated_at`   | datetime         | No       | current UTC time (via factory) | Last update timestamp         |
+
+### Validation
+
+- `name`: minimum 1 character, maximum 100 characters, strip_whitespace=True.
+- `api_key`: minimum 1 character (non-empty string).
+- `base_url`: must start with "http://" or "https://".
+
+---
+
+## 3. Error Handling
+
+The model raises a standard pydantic.ValidationError on invalid data.
+No custom error handling is provided at the entity level — this is the responsibility of upstream layers (services, api).

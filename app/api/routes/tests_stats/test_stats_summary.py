@@ -2,7 +2,7 @@
 Тесты для GET /api/stats/summary — сводная статистика.
 
 Извлечены из app/api/routes/test_stats.py при рефакторинге.
-Спецификация: app/api/routes/stats_spec.md
+Specification: app/api/routes/stats_spec.md
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ class TestGetStatsSummarySuccess:
     def test_response_has_exactly_6_keys(
         self, client: TestClient, mock_log_service: AsyncMock
     ):
-        """Ответ содержит ровно 6 ключей (spec 2.6)."""
+        """Ответ contains exactly 6 ключей (spec 2.6)."""
         response = client.get("/api/stats/summary")
         body = response.json()
         expected_keys = {
@@ -98,7 +98,7 @@ class TestGetStatsSummarySuccess:
     def test_service_get_stats_summary_called(
         self, client: TestClient, mock_log_service: AsyncMock
     ):
-        """Сервис get_stats_summary вызывается."""
+        """Сервис get_stats_summary is called."""
         client.get("/api/stats/summary")
         mock_log_service.get_stats_summary.assert_called()
 
@@ -214,7 +214,7 @@ class TestStatsSummaryDoubleCheckCache:
     """[SRE_MARKER] Double-check кэша после захвата блокировки (spec 2.5 п.3).
 
     stats_spec.md §2.5 п.3: повторно проверить кэш после захвата блокировки —
-    другой запрос мог обновить кэш пока мы ждали.
+    другой запрос мог обновить кэш until мы ждали.
     """
 
     def test_cache_invalidation_after_ttl(

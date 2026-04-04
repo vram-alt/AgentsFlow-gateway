@@ -30,7 +30,7 @@ from app.api.utils import (
 router = APIRouter(prefix="/api/providers", tags=["Providers"])
 
 
-# ── Кэш для health-check (upgrade spec §1.4 п.2) ────────────────────
+# ── Cache for health-check (upgrade spec §1.4 step 2) ────────────────────
 _health_cache: dict[str, Any] = {}
 _health_cache_timestamp: float = 0.0
 _health_cache_service_id: int | None = None
@@ -76,9 +76,9 @@ async def list_providers(
     provider_service: Any = Depends(get_provider_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """List all providers."""
+    """List all providers (including inactive)."""
     try:
-        result = await provider_service.list_providers()
+        result = await provider_service.list_providers(only_active=False)
     except Exception as exc:
         return internal_error_response(exc)
 
@@ -133,6 +133,40 @@ async def update_provider(
     if is_gateway_error(result):
         return gateway_error_response(result)
 
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error_code": "NOT_FOUND",
+                "message": f"Provider with ID {provider_id} not found",
+            },
+        )
+
+    return JSONResponse(status_code=200, content=serialize(result))
+
+
+# ── PATCH /api/providers/{provider_id}/toggle ─────────────────────────
+@router.patch("/{provider_id}/toggle")
+async def toggle_provider(
+    provider_id: int,
+    provider_service: Any = Depends(get_provider_service),
+    _current_user: str = Depends(get_current_user),
+) -> JSONResponse:
+    """Toggle is_active status of a provider."""
+    try:
+        result = await provider_service.toggle_active(provider_id=provider_id)
+    except Exception as exc:
+        return internal_error_response(exc)
+
+    if result is None:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error_code": "NOT_FOUND",
+                "message": f"Provider with ID {provider_id} not found",
+            },
+        )
+
     return JSONResponse(status_code=200, content=serialize(result))
 
 
@@ -151,5 +185,14 @@ async def delete_provider(
 
     if is_gateway_error(result):
         return gateway_error_response(result)
+
+    if result is False:
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error_code": "NOT_FOUND",
+                "message": f"Provider with ID {provider_id} not found",
+            },
+        )
 
     return JSONResponse(status_code=200, content={"status": "deleted"})

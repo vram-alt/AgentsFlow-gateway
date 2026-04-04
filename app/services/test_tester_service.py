@@ -1,12 +1,12 @@
 """
 TDD Red-phase тесты для TesterService — оркестратора модуля Testing Console.
 
-Спецификация: app/services/tester_service_spec.md
+Specification: app/services/tester_service_spec.md
 
-Все тесты ДОЛЖНЫ падать на Red-фазе, пока TesterService не реализован
-(tester_service.py пуст).
+Все тесты ДОЛЖНЫ падать на Red-фазе, until TesterService is not implemented
+(tester_service.py is empty).
 
-Все зависимости (ProviderRepository, httpx.AsyncClient) — строго замоканы.
+All dependencies (ProviderRepository, httpx.AsyncClient) — are strictly mocked.
 """
 
 from __future__ import annotations
@@ -17,15 +17,15 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
-# ── Импорт тестируемого класса (упадёт на Red-фазе) ─────────────────────
+# ── Import tested class (will fail during Red phase) ─────────────────────
 from app.services.tester_service import TesterService
 
-# ── Импорт доменных объектов (уже реализованы) ───────────────────────────
+# ── Импорт доменных объектов (already implemented) ───────────────────────────
 from app.domain.dto.gateway_error import GatewayError
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Константы
+# Constants
 # ═══════════════════════════════════════════════════════════════════════════
 
 SAMPLE_PROVIDER_NAME = "portkey"
@@ -37,13 +37,13 @@ SAMPLE_BODY = {"model": "gpt-4", "messages": [{"role": "user", "content": "Hi"}]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def mock_provider_repo():
-    """Мок ProviderRepository с async-методами."""
+    """Mock ProviderRepository with async methods."""
     repo = AsyncMock()
     provider_record = MagicMock()
     provider_record.api_key = SAMPLE_API_KEY
@@ -56,16 +56,16 @@ def mock_provider_repo():
 
 @pytest.fixture
 def mock_http_client():
-    """Мок httpx.AsyncClient."""
+    """Mock httpx.AsyncClient."""
     client = AsyncMock(spec=httpx.AsyncClient)
-    # По умолчанию: успешный ответ
+    # Default: successful response
     mock_response = MagicMock(spec=httpx.Response)
     mock_response.status_code = 200
     mock_response.headers = {
         "content-type": "application/json",
         "x-request-id": "req-123",
         "x-portkey-trace-id": "trace-456",
-        "server": "nginx",  # Этот заголовок должен быть отфильтрован
+        "server": "nginx",  # This header should be filtered out
     }
     mock_response.text = '{"choices": [{"message": {"content": "Hello!"}}]}'
     mock_response.json.return_value = {
@@ -79,7 +79,7 @@ def mock_http_client():
 
 @pytest.fixture
 def service(mock_provider_repo, mock_http_client):
-    """Экземпляр TesterService с замоканными зависимостями."""
+    """Instance of TesterService with mocked dependencies."""
     return TesterService(
         provider_repo=mock_provider_repo,
         http_client=mock_http_client,
@@ -92,12 +92,12 @@ def service(mock_provider_repo, mock_http_client):
 
 
 class TestTesterServiceConstructor:
-    """Тесты конструктора TesterService (spec 1.1)."""
+    """Constructor tests for TesterService (spec 1.1)."""
 
     def test_constructor_accepts_dependencies(
         self, mock_provider_repo, mock_http_client
     ):
-        """TesterService принимает provider_repo и http_client."""
+        """TesterService accepts provider_repo и http_client."""
         svc = TesterService(
             provider_repo=mock_provider_repo,
             http_client=mock_http_client,
@@ -135,7 +135,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_returns_dict_on_success(self, service):
-        """При успехе возвращается словарь (не GatewayError)."""
+        """On success returns a dict (not GatewayError)."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -148,7 +148,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_result_contains_status_code(self, service):
-        """Результат содержит status_code."""
+        """Result contains status_code."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -161,7 +161,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_result_contains_headers(self, service):
-        """Результат содержит отфильтрованные заголовки."""
+        """Result contains отфильтрованные заголовки."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -174,7 +174,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_result_contains_body(self, service):
-        """Результат содержит body."""
+        """Result contains body."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -186,7 +186,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_result_contains_latency_ms(self, service):
-        """Результат содержит latency_ms."""
+        """Result contains latency_ms."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -211,7 +211,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_latency_ms_rounded_to_2_decimals(self, service):
-        """latency_ms округлена до 2 знаков (spec 1.2 п.9)."""
+        """latency_ms is rounded to 2 decimal places (spec 1.2 п.9)."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -226,7 +226,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_calls_provider_repo(self, service, mock_provider_repo):
-        """Вызывает provider_repo.get_active_by_name."""
+        """Calls provider_repo.get_active_by_name."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -240,7 +240,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_calls_http_client_request(self, service, mock_http_client):
-        """Вызывает http_client.request с правильным методом."""
+        """Calls http_client.request с правильным методом."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -252,7 +252,7 @@ class TestProxyRequestHappyPath:
 
     @pytest.mark.asyncio
     async def test_url_formed_correctly(self, service, mock_http_client):
-        """URL формируется как base_url + path (spec 1.2 п.3)."""
+        """URL is formed as base_url + path (spec 1.2 п.3)."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -262,7 +262,7 @@ class TestProxyRequestHappyPath:
         )
         call_args = mock_http_client.request.call_args
         args, kwargs = call_args
-        # URL должен быть https://api.portkey.ai/v1/chat/completions
+        # URL should be https://api.portkey.ai/v1/chat/completions
         url = kwargs.get("url") or (args[1] if len(args) > 1 else None)
         expected = "https://api.portkey.ai/v1/chat/completions"
         assert url == expected
@@ -274,11 +274,11 @@ class TestProxyRequestHappyPath:
 
 
 class TestProxyRequestProviderNotFound:
-    """Провайдер не найден -> GatewayError(PROVIDER_NOT_FOUND)."""
+    """Provider not found -> GatewayError(PROVIDER_NOT_FOUND)."""
 
     @pytest.mark.asyncio
     async def test_returns_gateway_error(self, service, mock_provider_repo):
-        """Если провайдер не найден -> GatewayError."""
+        """If провайдер не найден -> GatewayError."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         result = await service.proxy_request(
@@ -322,7 +322,7 @@ class TestProxyRequestProviderNotFound:
     async def test_http_client_not_called(
         self, service, mock_provider_repo, mock_http_client
     ):
-        """HTTP-клиент НЕ вызывается, если провайдер не найден."""
+        """HTTP client is NOT called, if provider not found."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         await service.proxy_request(
@@ -373,7 +373,7 @@ class TestProxyRequestPathValidation:
 
     @pytest.mark.asyncio
     async def test_percent_encoded_path_traversal_rejected(self, service):
-        """[SRE_MARKER] Percent-encoded '..' (%2e%2e) отклоняется после URL-декодирования."""
+        """[SRE_MARKER] Percent-encoded '..' (%2e%2e) is rejected после URL-декодирования."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -386,7 +386,7 @@ class TestProxyRequestPathValidation:
 
     @pytest.mark.asyncio
     async def test_percent_encoded_absolute_url_rejected(self, service):
-        """[SRE_MARKER] Percent-encoded '://' отклоняется после URL-декодирования."""
+        """[SRE_MARKER] Percent-encoded '://' is rejected после URL-декодирования."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -401,7 +401,7 @@ class TestProxyRequestPathValidation:
     async def test_http_client_not_called_on_invalid_path(
         self, service, mock_http_client
     ):
-        """HTTP-клиент НЕ вызывается при невалидном path."""
+        """HTTP client is NOT called on invalid path."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -422,7 +422,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_private_ip_127_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] Приватный IP 127.0.0.1 отклоняется."""
+        """[SRE_MARKER] Приватный IP 127.0.0.1 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://127.0.0.1"
@@ -441,7 +441,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_private_ip_10_range_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] Приватный IP 10.0.0.1 отклоняется."""
+        """[SRE_MARKER] Приватный IP 10.0.0.1 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://10.0.0.1"
@@ -460,7 +460,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_private_ip_172_16_range_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] Приватный IP 172.16.0.1 отклоняется."""
+        """[SRE_MARKER] Приватный IP 172.16.0.1 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://172.16.0.1"
@@ -479,7 +479,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_private_ip_192_168_range_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] Приватный IP 192.168.1.1 отклоняется."""
+        """[SRE_MARKER] Приватный IP 192.168.1.1 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://192.168.1.1"
@@ -498,7 +498,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_aws_metadata_ip_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] AWS metadata endpoint 169.254.169.254 отклоняется."""
+        """[SRE_MARKER] AWS metadata endpoint 169.254.169.254 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://169.254.169.254"
@@ -517,7 +517,7 @@ class TestProxyRequestSSRFValidation:
 
     @pytest.mark.asyncio
     async def test_ipv6_loopback_rejected(self, service, mock_provider_repo):
-        """[SRE_MARKER] IPv6 loopback ::1 отклоняется."""
+        """[SRE_MARKER] IPv6 loopback ::1 is rejected."""
         provider = MagicMock()
         provider.api_key = SAMPLE_API_KEY
         provider.base_url = "https://[::1]"
@@ -545,7 +545,7 @@ class TestProxyRequestHeaders:
 
     @pytest.mark.asyncio
     async def test_api_key_header_set(self, service, mock_http_client):
-        """Заголовок x-portkey-api-key устанавливается из записи провайдера."""
+        """Header x-portkey-api-key устанавливается из записи a provider."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -560,7 +560,7 @@ class TestProxyRequestHeaders:
 
     @pytest.mark.asyncio
     async def test_content_type_header_set(self, service, mock_http_client):
-        """Заголовок Content-Type = application/json."""
+        """Header Content-Type = application/json."""
         await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -588,7 +588,7 @@ class TestProxyRequestHeaders:
         call_args = mock_http_client.request.call_args
         _, kwargs = call_args
         sent_headers = kwargs.get("headers", {})
-        # API-ключ должен остаться оригинальным
+        # API key must remain original
         assert sent_headers.get("x-portkey-api-key") == SAMPLE_API_KEY
 
     @pytest.mark.asyncio
@@ -606,7 +606,7 @@ class TestProxyRequestHeaders:
         call_args = mock_http_client.request.call_args
         _, kwargs = call_args
         sent_headers = kwargs.get("headers", {})
-        # Проверяем, что ни один вариант регистра не содержит evil-key
+        # Verify that no case variant contains evil-key
         for key, value in sent_headers.items():
             if key.lower() == "x-portkey-api-key":
                 assert value == SAMPLE_API_KEY
@@ -622,7 +622,7 @@ class TestProxyRequestResponseHeaderFiltering:
 
     @pytest.mark.asyncio
     async def test_allowed_headers_included(self, service):
-        """Допустимые заголовки (content-type, x-request-id, x-portkey-trace-id, retry-after) включаются."""
+        """Allowed headers (content-type, x-request-id, x-portkey-trace-id, retry-after) are included."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -635,7 +635,7 @@ class TestProxyRequestResponseHeaderFiltering:
 
     @pytest.mark.asyncio
     async def test_disallowed_headers_excluded(self, service):
-        """Недопустимые заголовки (server и т.д.) исключаются."""
+        """Disallowed headers (server и т.д.) are excluded."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -657,7 +657,7 @@ class TestProxyRequestHttpErrors:
 
     @pytest.mark.asyncio
     async def test_timeout_returns_proxy_timeout(self, service, mock_http_client):
-        """Таймаут -> GatewayError(PROXY_TIMEOUT, 504)."""
+        """Timeout -> GatewayError(PROXY_TIMEOUT, 504)."""
         mock_http_client.request.side_effect = httpx.TimeoutException("Timed out")
 
         result = await service.proxy_request(
@@ -675,7 +675,7 @@ class TestProxyRequestHttpErrors:
     async def test_connect_error_returns_proxy_connection_error(
         self, service, mock_http_client
     ):
-        """Ошибка соединения -> GatewayError(PROXY_CONNECTION_ERROR, 502)."""
+        """Connection error -> GatewayError(PROXY_CONNECTION_ERROR, 502)."""
         mock_http_client.request.side_effect = httpx.ConnectError("Connection refused")
 
         result = await service.proxy_request(
@@ -693,7 +693,7 @@ class TestProxyRequestHttpErrors:
     async def test_generic_exception_returns_internal_error(
         self, service, mock_http_client
     ):
-        """Непредвиденное исключение -> GatewayError(INTERNAL_ERROR, 500)."""
+        """Unexpected exception -> GatewayError(INTERNAL_ERROR, 500)."""
         mock_http_client.request.side_effect = RuntimeError("Unexpected")
 
         result = await service.proxy_request(
@@ -748,7 +748,7 @@ class TestProxyRequestTraceId:
 
     @pytest.mark.asyncio
     async def test_trace_id_on_provider_not_found(self, service, mock_provider_repo):
-        """trace_id присутствует при PROVIDER_NOT_FOUND."""
+        """trace_id is present on PROVIDER_NOT_FOUND."""
         mock_provider_repo.get_active_by_name.return_value = None
 
         result = await service.proxy_request(
@@ -764,7 +764,7 @@ class TestProxyRequestTraceId:
 
     @pytest.mark.asyncio
     async def test_trace_id_on_timeout(self, service, mock_http_client):
-        """trace_id присутствует при PROXY_TIMEOUT."""
+        """trace_id is present on PROXY_TIMEOUT."""
         mock_http_client.request.side_effect = httpx.TimeoutException("Timed out")
 
         result = await service.proxy_request(
@@ -780,7 +780,7 @@ class TestProxyRequestTraceId:
 
     @pytest.mark.asyncio
     async def test_trace_id_on_validation_error(self, service):
-        """trace_id присутствует при VALIDATION_ERROR."""
+        """trace_id is present on VALIDATION_ERROR."""
         result = await service.proxy_request(
             provider_name=SAMPLE_PROVIDER_NAME,
             method=SAMPLE_METHOD,
@@ -794,7 +794,7 @@ class TestProxyRequestTraceId:
 
     @pytest.mark.asyncio
     async def test_trace_id_on_internal_error(self, service, mock_http_client):
-        """trace_id присутствует при INTERNAL_ERROR."""
+        """trace_id is present on INTERNAL_ERROR."""
         mock_http_client.request.side_effect = RuntimeError("Boom")
 
         result = await service.proxy_request(
@@ -814,7 +814,7 @@ class TestProxyRequestResponseParsing:
 
     @pytest.mark.asyncio
     async def test_json_response_parsed(self, service, mock_http_client):
-        """Валидный JSON-ответ парсится в dict."""
+        """Valid JSON response is parsed into a dict."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "application/json"}
@@ -835,7 +835,7 @@ class TestProxyRequestResponseParsing:
 
     @pytest.mark.asyncio
     async def test_non_json_response_returned_as_text(self, service, mock_http_client):
-        """Невалидный JSON-ответ возвращается как строка."""
+        """Invalid JSON response is returned as a string."""
         mock_response = MagicMock(spec=httpx.Response)
         mock_response.status_code = 200
         mock_response.headers = {"content-type": "text/plain"}
@@ -863,7 +863,7 @@ class TestProxyRequestApiKeyNotLeaked:
     async def test_api_key_not_in_timeout_error_message(
         self, service, mock_http_client
     ):
-        """API-ключ отсутствует в сообщении ошибки таймаута."""
+        """API key is absent from the timeout error message."""
         mock_http_client.request.side_effect = httpx.TimeoutException("Timed out")
 
         result = await service.proxy_request(
@@ -880,7 +880,7 @@ class TestProxyRequestApiKeyNotLeaked:
     async def test_api_key_not_in_internal_error_message(
         self, service, mock_http_client
     ):
-        """API-ключ отсутствует в сообщении внутренней ошибки."""
+        """API key is absent from the internal error message."""
         mock_http_client.request.side_effect = RuntimeError(
             f"Error with key {SAMPLE_API_KEY}"
         )

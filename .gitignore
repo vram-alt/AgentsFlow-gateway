@@ -1,5 +1,7 @@
-# Environment
+# Environment — protect ALL .env files except the example template
 .env
+.env.*
+!.env.example
 *.env.local
 
 # Python
@@ -15,6 +17,10 @@ venv/
 # SQLite
 *.db
 *.sqlite3
+
+# OS files
+.DS_Store
+Thumbs.db
 
 # IDE
 .idea/

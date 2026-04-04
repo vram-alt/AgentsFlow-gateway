@@ -1,9 +1,9 @@
 """
-Модульные тесты для WebhookService.
-Спецификация: app/services/webhook_service_spec.md
+Unit tests for WebhookService.
+Specification: app/services/webhook_service_spec.md
 
-TDD Red-фаза: все тесты должны падать с ImportError,
-пока WebhookService не реализован.
+TDD Red phase: all tests should fail with ImportError,
+until WebhookService is not implemented.
 """
 
 from __future__ import annotations
@@ -15,26 +15,26 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ── Импорт тестируемого класса (должен упасть на Red-фазе) ──────────────
+# ── Import tested class (should fail during Red phase) ──────────────
 from app.services.webhook_service import WebhookService
 
-# ── Импорт доменных объектов (уже реализованы в скаффолдинге) ────────────
+# ── Импорт доменных объектов (already implemented in scaffolding) ────────────
 from app.domain.entities.log_entry import EventType
 
-# ── Регулярка UUID v4 для валидации ─────────────────────────────────────
+# ── UUID v4 regex for validation ─────────────────────────────────────
 _UUID_V4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def mock_log_service():
-    """Мок LogService с async-методами."""
+    """Mock LogService with async methods."""
     svc = AsyncMock()
     svc.log_guardrail_incident = AsyncMock(return_value=None)
     return svc
@@ -42,7 +42,7 @@ def mock_log_service():
 
 @pytest.fixture
 def mock_log_repo():
-    """Мок LogRepository с async-методами."""
+    """Mock LogRepository with async methods."""
     repo = AsyncMock()
     repo.get_by_trace_id = AsyncMock(return_value=[])
     return repo
@@ -50,19 +50,19 @@ def mock_log_repo():
 
 @pytest.fixture
 def service(mock_log_service, mock_log_repo):
-    """Экземпляр WebhookService с замоканными зависимостями."""
+    """Instance of WebhookService with mocked dependencies."""
     return WebhookService(log_service=mock_log_service, log_repo=mock_log_repo)
 
 
 @pytest.fixture
 def valid_trace_id():
-    """Валидный UUID v4 trace_id."""
+    """Valid UUID v4 trace_id."""
     return "123e4567-e89b-42d3-a456-426614174000"
 
 
 @pytest.fixture
 def sample_guardrail_payload(valid_trace_id):
-    """Пример входящего webhook-payload с trace_id в корне."""
+    """Sample incoming webhook payload with trace_id at root."""
     return {
         "trace_id": valid_trace_id,
         "event": "guardrail_triggered",
@@ -74,7 +74,7 @@ def sample_guardrail_payload(valid_trace_id):
 
 @pytest.fixture
 def sample_payload_trace_in_metadata(valid_trace_id):
-    """Payload с trace_id во вложенном metadata."""
+    """Payload with trace_id in nested metadata."""
     return {
         "event": "guardrail_triggered",
         "rule": "pii_detection",
@@ -87,7 +87,7 @@ def sample_payload_trace_in_metadata(valid_trace_id):
 
 @pytest.fixture
 def sample_payload_no_trace():
-    """Payload без trace_id нигде."""
+    """Payload without trace_id anywhere."""
     return {
         "event": "guardrail_triggered",
         "rule": "toxicity_filter",
@@ -97,7 +97,7 @@ def sample_payload_no_trace():
 
 @pytest.fixture
 def fake_chat_request_log(valid_trace_id):
-    """Фейковая ORM-запись chat_request для имитации связи с промптом."""
+    """Fake chat_request ORM record simulating prompt linkage."""
     log = MagicMock()
     log.trace_id = valid_trace_id
     log.event_type = EventType.CHAT_REQUEST
@@ -107,38 +107,38 @@ def fake_chat_request_log(valid_trace_id):
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Конструктор (спецификация §2)
+# Constructor (specification §2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestWebhookServiceConstructor:
-    """Тесты конструктора WebhookService (спецификация §2)."""
+    """Constructor tests for WebhookService (specification §2)."""
 
     def test_constructor_accepts_log_service_and_log_repo(
         self, mock_log_service, mock_log_repo
     ):
-        """WebhookService принимает log_service и log_repo через конструктор."""
+        """WebhookService accepts log_service и log_repo via constructor."""
         svc = WebhookService(log_service=mock_log_service, log_repo=mock_log_repo)
         assert svc is not None
 
     def test_constructor_stores_log_service(self, mock_log_service, mock_log_repo):
-        """Зависимость log_service сохраняется как атрибут экземпляра."""
+        """Dependency log_service is stored as an instance attribute."""
         svc = WebhookService(log_service=mock_log_service, log_repo=mock_log_repo)
         assert svc.log_service is mock_log_service
 
     def test_constructor_stores_log_repo(self, mock_log_service, mock_log_repo):
-        """Зависимость log_repo сохраняется как атрибут экземпляра."""
+        """Dependency log_repo is stored as an instance attribute."""
         svc = WebhookService(log_service=mock_log_service, log_repo=mock_log_repo)
         assert svc.log_repo is mock_log_repo
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Извлечение trace_id (спецификация §4, шаг 1)
+# 4. process_guardrail_incident — Извлечение trace_id (specification §4, шаг 1)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestTraceIdExtraction:
-    """Тесты извлечения trace_id из payload (спецификация §4, шаг 1)."""
+    """Tests for trace_id extraction from payload (specification §4, step 1)."""
 
     @pytest.mark.asyncio
     async def test_trace_id_from_root(
@@ -164,7 +164,7 @@ class TestTraceIdExtraction:
     async def test_trace_id_generated_when_missing(
         self, service, mock_log_repo, sample_payload_no_trace
     ):
-        """Если trace_id нигде нет — генерируется новый UUID."""
+        """If trace_id нигде нет — генерируется новый UUID."""
         result = await service.process_guardrail_incident(
             payload=sample_payload_no_trace
         )
@@ -172,7 +172,7 @@ class TestTraceIdExtraction:
 
     @pytest.mark.asyncio
     async def test_trace_id_generated_when_empty_string(self, service, mock_log_repo):
-        """Если trace_id — пустая строка, генерируется новый UUID."""
+        """If trace_id — пустая строка, генерируется новый UUID."""
         payload = {"trace_id": "", "event": "guardrail_triggered"}
         result = await service.process_guardrail_incident(payload=payload)
         assert result["trace_id"] != ""
@@ -185,7 +185,7 @@ class TestTraceIdExtraction:
         """trace_id_source = 'webhook' когда trace_id извлечён из payload."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
-        # Проверяем incident_payload, переданный в log_service
+        # Verify incident_payload passed to log_service
         call_args = mock_log_service.log_guardrail_incident.call_args
         incident_payload = (
             call_args[0][1]
@@ -228,18 +228,18 @@ class TestTraceIdExtraction:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Валидация формата trace_id (спецификация §4, шаг 2)
+# 4. process_guardrail_incident — Валидация формата trace_id (specification §4, шаг 2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestTraceIdValidation:
-    """Тесты валидации формата trace_id (спецификация §4, шаг 2)."""
+    """Tests for trace_id format validation (specification §4, step 2)."""
 
     @pytest.mark.asyncio
     async def test_valid_uuid_trace_id_accepted(
         self, service, sample_guardrail_payload, valid_trace_id
     ):
-        """Валидный UUID v4 trace_id принимается без проблем."""
+        """Валидный UUID v4 trace_id acceptsся без проблем."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -268,12 +268,12 @@ class TestTraceIdValidation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Связь с исходным запросом (спецификация §4, шаг 3)
+# 4. process_guardrail_incident — Связь с исходным запросом (specification §4, шаг 3)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestLinkedToPrompt:
-    """Тесты проверки связи с исходным запросом (спецификация §4, шаг 3)."""
+    """Tests for original request linkage check (specification §4, step 3)."""
 
     @pytest.mark.asyncio
     async def test_linked_to_prompt_true_when_chat_request_found(
@@ -326,7 +326,7 @@ class TestLinkedToPrompt:
     async def test_orphaned_incident_still_recorded(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Осиротевший инцидент (нет связи) всё равно записывается в журнал."""
+        """Orphaned incident (no linkage) is still recorded in the audit log."""
         mock_log_repo.get_by_trace_id.return_value = []
 
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
@@ -335,18 +335,18 @@ class TestLinkedToPrompt:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Формирование записи инцидента (спецификация §4, шаг 4)
+# 4. process_guardrail_incident — Формирование записи инцидента (specification §4, шаг 4)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestIncidentPayloadFormation:
-    """Тесты формирования записи инцидента (спецификация §4, шаг 4)."""
+    """Tests for incident record formation (specification §4, step 4)."""
 
     @pytest.mark.asyncio
     async def test_incident_contains_original_webhook_body(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Запись инцидента содержит original_webhook_body с исходным payload."""
+        """Incident record contains original_webhook_body with original payload."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -362,7 +362,7 @@ class TestIncidentPayloadFormation:
     async def test_incident_contains_trace_id_source(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Запись инцидента содержит trace_id_source."""
+        """Incident record contains trace_id_source."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -377,7 +377,7 @@ class TestIncidentPayloadFormation:
     async def test_incident_contains_linked_to_prompt(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Запись инцидента содержит linked_to_prompt (булево)."""
+        """Incident record contains linked_to_prompt (boolean)."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -393,7 +393,7 @@ class TestIncidentPayloadFormation:
     async def test_incident_contains_processed_at_iso(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Запись инцидента содержит processed_at в формате ISO 8601 UTC."""
+        """Incident record contains processed_at in ISO 8601 UTC format."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -410,7 +410,7 @@ class TestIncidentPayloadFormation:
     async def test_incident_has_exactly_four_keys(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """Запись инцидента содержит ровно 4 ключа."""
+        """Запись инцидента contains exactly 4 ключа."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -429,18 +429,18 @@ class TestIncidentPayloadFormation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Запись в журнал (спецификация §4, шаг 5)
+# 4. process_guardrail_incident — Запись в журнал (specification §4, шаг 5)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestJournalWrite:
-    """Тесты записи в журнал через log_service (спецификация §4, шаг 5)."""
+    """Tests for audit log writing via log_service (specification §4, step 5)."""
 
     @pytest.mark.asyncio
     async def test_log_guardrail_incident_called(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """log_service.log_guardrail_incident вызывается."""
+        """log_service.log_guardrail_incident is called."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         mock_log_service.log_guardrail_incident.assert_awaited_once()
@@ -454,7 +454,7 @@ class TestJournalWrite:
         sample_guardrail_payload,
         valid_trace_id,
     ):
-        """log_service.log_guardrail_incident получает правильный trace_id."""
+        """log_service.log_guardrail_incident receives the correct trace_id."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -467,7 +467,7 @@ class TestJournalWrite:
     async def test_log_guardrail_incident_receives_incident_payload(
         self, service, mock_log_service, mock_log_repo, sample_guardrail_payload
     ):
-        """log_service.log_guardrail_incident получает словарь incident_payload."""
+        """log_service.log_guardrail_incident receives a dict incident_payload."""
         await service.process_guardrail_incident(payload=sample_guardrail_payload)
 
         call_args = mock_log_service.log_guardrail_incident.call_args
@@ -480,16 +480,16 @@ class TestJournalWrite:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. process_guardrail_incident — Возврат подтверждения (спецификация §4, шаг 6)
+# 4. process_guardrail_incident — Возврат подтверждения (specification §4, шаг 6)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestReturnConfirmation:
-    """Тесты возвращаемого словаря подтверждения (спецификация §4, шаг 6)."""
+    """Tests for the returned confirmation dict (specification §4, step 6)."""
 
     @pytest.mark.asyncio
     async def test_returns_dict(self, service, sample_guardrail_payload):
-        """Метод возвращает словарь."""
+        """Method returns словарь."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -497,7 +497,7 @@ class TestReturnConfirmation:
 
     @pytest.mark.asyncio
     async def test_status_accepted(self, service, sample_guardrail_payload):
-        """Возвращаемый словарь содержит status='accepted'."""
+        """Returned dict contains status='accepted'."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -507,7 +507,7 @@ class TestReturnConfirmation:
     async def test_trace_id_in_response(
         self, service, sample_guardrail_payload, valid_trace_id
     ):
-        """Возвращаемый словарь содержит trace_id."""
+        """Returned dict contains trace_id."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -517,7 +517,7 @@ class TestReturnConfirmation:
     async def test_linked_to_prompt_in_response(
         self, service, sample_guardrail_payload
     ):
-        """Возвращаемый словарь содержит linked_to_prompt (булево)."""
+        """Returned dict contains linked_to_prompt (boolean)."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -528,7 +528,7 @@ class TestReturnConfirmation:
     async def test_response_has_exactly_three_keys(
         self, service, sample_guardrail_payload
     ):
-        """Возвращаемый словарь содержит ровно 3 ключа: status, trace_id, linked_to_prompt."""
+        """Возвращаемый словарь contains exactly 3 ключа: status, trace_id, linked_to_prompt."""
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -538,7 +538,7 @@ class TestReturnConfirmation:
     async def test_generated_trace_id_in_response_when_missing(
         self, service, sample_payload_no_trace
     ):
-        """Сгенерированный trace_id возвращается в ответе."""
+        """Generated trace_id is returned in the response."""
         result = await service.process_guardrail_incident(
             payload=sample_payload_no_trace
         )
@@ -546,16 +546,16 @@ class TestReturnConfirmation:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. Обработка ошибок (спецификация §5)
+# 5. Обработка ошибок (specification §5)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestErrorHandling:
-    """Тесты обработки ошибок (спецификация §5)."""
+    """Error handling tests (specification §5)."""
 
     @pytest.mark.asyncio
     async def test_empty_payload_returns_rejected(self, service):
-        """Пустой payload → status='rejected', reason='empty payload'."""
+        """Empty payload → status='rejected', reason='empty payload'."""
         result = await service.process_guardrail_incident(payload={})
         assert result["status"] == "rejected"
         assert result["reason"] == "empty payload"
@@ -601,7 +601,7 @@ class TestErrorHandling:
         """[SRE_MARKER] Ошибка записи в БД не пробрасывается наверх."""
         mock_log_service.log_guardrail_incident.side_effect = RuntimeError("DB timeout")
 
-        # Не должно бросить исключение
+        # Should not raise an exception
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
@@ -632,7 +632,7 @@ class TestErrorHandling:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Интеграционные сценарии (полный путь)
+# Integration scenarios (full path)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
@@ -649,22 +649,22 @@ class TestFullFlow:
         valid_trace_id,
         fake_chat_request_log,
     ):
-        """Полный путь: trace_id из payload, связан с промптом."""
+        """Full path: trace_id из payload, связан с промптом."""
         mock_log_repo.get_by_trace_id.return_value = [fake_chat_request_log]
 
         result = await service.process_guardrail_incident(
             payload=sample_guardrail_payload
         )
 
-        # 1. Проверка trace_id
+        # 1. Verify trace_id
         assert result["trace_id"] == valid_trace_id
-        # 2. Связь с промптом
+        # 2. Prompt linkage
         assert result["linked_to_prompt"] is True
-        # 3. Статус
+        # 3. Status
         assert result["status"] == "accepted"
-        # 4. log_repo.get_by_trace_id вызван
+        # 4. log_repo.get_by_trace_id was called
         mock_log_repo.get_by_trace_id.assert_awaited_once_with(valid_trace_id)
-        # 5. log_service.log_guardrail_incident вызван
+        # 5. log_service.log_guardrail_incident was called
         mock_log_service.log_guardrail_incident.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -675,20 +675,20 @@ class TestFullFlow:
         mock_log_repo,
         sample_payload_no_trace,
     ):
-        """Полный путь: trace_id отсутствует, инцидент осиротевший."""
+        """Full path: trace_id отсутствует, инцидент осиротевший."""
         mock_log_repo.get_by_trace_id.return_value = []
 
         result = await service.process_guardrail_incident(
             payload=sample_payload_no_trace
         )
 
-        # 1. trace_id сгенерирован
+        # 1. trace_id was generated
         assert _UUID_V4_RE.match(result["trace_id"]) is not None
-        # 2. Нет связи с промптом
+        # 2. No prompt linkage
         assert result["linked_to_prompt"] is False
-        # 3. Статус
+        # 3. Status
         assert result["status"] == "accepted"
-        # 4. Запись всё равно произведена
+        # 4. Record was still written
         mock_log_service.log_guardrail_incident.assert_awaited_once()
 
     @pytest.mark.asyncio
@@ -701,7 +701,7 @@ class TestFullFlow:
         valid_trace_id,
         fake_chat_request_log,
     ):
-        """Полный путь: trace_id из metadata, связан с промптом."""
+        """Full path: trace_id из metadata, связан с промптом."""
         mock_log_repo.get_by_trace_id.return_value = [fake_chat_request_log]
 
         result = await service.process_guardrail_incident(

@@ -41,10 +41,10 @@ function StatCard({ title, value, subtitle, icon, trend, trendValue }: StatCardP
                 {trend === "down" && <ArrowDownRight className="w-3 h-3 text-destructive" />}
                 <span
                   className={`text-xs ${trend === "up"
-                      ? "text-success"
-                      : trend === "down"
-                        ? "text-destructive"
-                        : "text-muted-foreground"
+                    ? "text-success"
+                    : trend === "down"
+                      ? "text-destructive"
+                      : "text-muted-foreground"
                     }`}
                 >
                   {trendValue && `${trendValue} `}
@@ -174,7 +174,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <SimpleBarChart data={charts?.hourly_requests ?? []} />
+            <SimpleBarChart data={charts ?? []} />
           </CardContent>
         </Card>
 
@@ -186,7 +186,7 @@ export default function DashboardPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <SimpleBarChart data={charts?.hourly_errors ?? []} />
+            <SimpleBarChart data={[]} />
           </CardContent>
         </Card>
       </div>
@@ -214,8 +214,8 @@ export default function DashboardPage() {
                   <div className="flex items-center gap-3">
                     <div
                       className={`w-2 h-2 rounded-full ${p.status === "healthy"
-                          ? "bg-success animate-pulse-dot"
-                          : "bg-destructive"
+                        ? "bg-success animate-pulse-dot"
+                        : "bg-destructive"
                         }`}
                     />
                     <span className="text-sm font-medium">{p.name}</span>

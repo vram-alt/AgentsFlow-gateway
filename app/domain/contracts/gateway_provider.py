@@ -1,4 +1,4 @@
-"""Абстрактный контракт GatewayProvider — интерфейс для адаптеров LLM-провайдеров."""
+"""Abstract GatewayProvider contract — interface for LLM provider adapters."""
 
 from __future__ import annotations
 
@@ -13,56 +13,56 @@ from app.domain.dto.unified_response import UnifiedResponse
 
 
 class GatewayProvider(abc.ABC):
-    """Базовый контракт для каждого адаптера внешнего LLM-провайдера."""
+    """Base contract that every external LLM provider adapter must implement."""
 
     @property
     @abc.abstractmethod
     def provider_name(self) -> str:
-        """Уникальное имя провайдера (например, 'portkey')."""
+        """Unique provider name (e.g., 'portkey')."""
 
     @abc.abstractmethod
     async def send_prompt(
         self, prompt: UnifiedPrompt, api_key: str, base_url: str
     ) -> Union[UnifiedResponse, GatewayError]:
-        """Отправка запроса к LLM-провайдеру."""
+        """Send a request to the LLM provider."""
 
     @abc.abstractmethod
     async def create_guardrail(
         self, config: dict, api_key: str, base_url: str
     ) -> Union[dict, GatewayError]:
-        """Создание политики безопасности (Guardrail) на стороне провайдера."""
+        """Create a security policy (Guardrail) on the provider side."""
 
     @abc.abstractmethod
     async def update_guardrail(
         self, remote_id: str, config: dict, api_key: str, base_url: str
     ) -> Union[dict, GatewayError]:
-        """Обновление существующей политики безопасности."""
+        """Update an existing security policy."""
 
     @abc.abstractmethod
     async def delete_guardrail(
         self, remote_id: str, api_key: str, base_url: str
     ) -> Union[bool, GatewayError]:
-        """Удаление политики безопасности на стороне провайдера."""
+        """Delete a security policy on the provider side."""
 
     @abc.abstractmethod
     async def list_guardrails(
         self, api_key: str, base_url: str
     ) -> Union[list[dict], GatewayError]:
-        """Получение списка всех политик безопасности от провайдера."""
+        """Retrieve the list of all security policies from the provider."""
 
     # [GRN] Non-abstract methods with default implementations.
     # Concrete adapters SHOULD override these for proper resource management.
     # Not abstract to preserve backward compatibility with existing adapters.
 
     async def close(self) -> None:
-        """Корректно закрывает переиспользуемый HTTP-клиент.
+        """Gracefully close the reusable HTTP client.
 
         Must be called during application shutdown to release resources.
         Default: no-op. Adapters with persistent connections should override.
         """
 
     def get_http_client(self) -> httpx.AsyncClient:
-        """Возвращает переиспользуемый httpx.AsyncClient.
+        """Return the reusable httpx.AsyncClient.
 
         Used by DI layer to share the HTTP client with other components.
         Default: creates a new client. Adapters should override for reuse.

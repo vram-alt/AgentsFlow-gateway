@@ -23,7 +23,7 @@ class GatewayError(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     # ------------------------------------------------------------------
-    # Стандартные коды ошибок (константы уровня класса)
+    # Standard error codes (class-level constants)
     # ------------------------------------------------------------------
     TIMEOUT: ClassVar[str] = "TIMEOUT"
     AUTH_FAILED: ClassVar[str] = "AUTH_FAILED"
@@ -33,7 +33,7 @@ class GatewayError(BaseModel):
     UNKNOWN: ClassVar[str] = "UNKNOWN"
 
     # ------------------------------------------------------------------
-    # Поля
+    # Fields
     # ------------------------------------------------------------------
     trace_id: str
     error_code: str
@@ -43,7 +43,7 @@ class GatewayError(BaseModel):
     details: dict[str, Any] = Field(default_factory=dict)
 
     # ------------------------------------------------------------------
-    # Валидаторы
+    # Validators
     # ------------------------------------------------------------------
     @field_validator("trace_id")
     @classmethod

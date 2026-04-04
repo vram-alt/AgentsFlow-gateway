@@ -1,8 +1,8 @@
 """
-ORM-модели SQLAlchemy 2.0+ для AI Gateway.
+SQLAlchemy 2.0+ ORM models for AI Gateway.
 
-Таблицы: providers, policies, logs.
-Шифрование api_key через Fernet (String subclass with TypeDecorator-style methods).
+Tables: providers, policies, logs.
+api_key encryption via Fernet (String subclass with TypeDecorator-style methods).
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ from app.domain.utils.time import _utcnow
 
 
 # ---------------------------------------------------------------------------
-# Базовый декларативный класс (SQLAlchemy 2.0+)
+# Declarative base class (SQLAlchemy 2.0+)
 # ---------------------------------------------------------------------------
 class Base(DeclarativeBase):
     pass
@@ -97,7 +97,7 @@ class EncryptedString(String):
 
 
 # ---------------------------------------------------------------------------
-# Модель: ProviderModel
+# Model: ProviderModel
 # ---------------------------------------------------------------------------
 class ProviderModel(Base):
     __tablename__ = "providers"
@@ -121,7 +121,7 @@ class ProviderModel(Base):
 
 
 # ---------------------------------------------------------------------------
-# Модель: PolicyModel
+# Model: PolicyModel
 # ---------------------------------------------------------------------------
 class PolicyModel(Base):
     __tablename__ = "policies"
@@ -145,14 +145,14 @@ class PolicyModel(Base):
         DateTime, nullable=False, default=_utcnow, onupdate=_utcnow
     )
 
-    # Обратная связь к ProviderModel
+    # Back-reference to ProviderModel
     provider: Mapped[Optional["ProviderModel"]] = relationship(
         "ProviderModel", back_populates="policies"
     )
 
 
 # ---------------------------------------------------------------------------
-# Модель: LogEntryModel
+# Model: LogEntryModel
 # ---------------------------------------------------------------------------
 class LogEntryModel(Base):
     __tablename__ = "logs"

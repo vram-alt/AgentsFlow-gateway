@@ -1,126 +1,126 @@
-# Спецификация: Точка входа приложения (main.py)
+# Specification: Application Entry Point (main.py)
 
-> **Файл реализации:** `main.py`  
-> **Слой:** Корневой (композиция всех слоёв)  
-> **Ответственность:** Создание и конфигурация экземпляра FastAPI, подключение роутеров, lifespan-события
-
----
-
-## 1. Общие правила
-
-- `main.py` — единственный файл, который «знает» обо всех слоях и собирает их вместе.
-- Бизнес-логика **запрещена** в этом файле.
-- Конфигурация читается из `config.py` (Pydantic Settings).
+> **Implementation file:** `main.py`  
+> **Layer:** Root (composition of all layers)  
+> **Responsibility:** Creating and configuring the FastAPI instance, attaching routers, lifespan events
 
 ---
 
-## 2. Создание приложения FastAPI
+## 1. General Rules
 
-### Параметры экземпляра
+- `main.py` is the only file that "knows" about all layers and assembles them together.
+- Business logic is **prohibited** in this file.
+- Configuration is read from `config.py` (Pydantic Settings).
 
-| Параметр      | Значение                                              |
+---
+
+## 2. Creating the FastAPI Application
+
+### Instance Parameters
+
+| Parameter     | Value                                                 |
 |---------------|-------------------------------------------------------|
 | `title`       | `"AI Gateway Adapter"`                                |
 | `description` | `"Phase 3 POC — Intelligent proxy for LLM providers"` |
 | `version`     | `"0.1.0"`                                             |
-| `lifespan`    | Ссылка на асинхронный менеджер жизненного цикла       |
+| `lifespan`    | Reference to the async lifecycle manager              |
 
 ---
 
-## 3. Lifespan (события жизненного цикла)
+## 3. Lifespan (Lifecycle Events)
 
-### 3.1. Startup (при запуске)
+### 3.1. Startup
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Загрузить конфигурацию из `.env` через `config.get_settings()`.
-2. Инициализировать БД: вызвать `init_db()` (создание таблиц).
-3. Логировать: `"AI Gateway started successfully"`.
+1. Load configuration from `.env` via `config.get_settings()`.
+2. Initialize the database: call `init_db()` (table creation).
+3. Log: `"AI Gateway started successfully"`.
 
-### 3.2. Shutdown (при остановке)
+### 3.2. Shutdown
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Закрыть пул соединений БД: `engine.dispose()`.
-2. Логировать: `"AI Gateway shut down"`.
+1. Close the database connection pool: `engine.dispose()`.
+2. Log: `"AI Gateway shut down"`.
 
-### 3.3. Порядок инициализации (Startup Order)
+### 3.3. Initialization Order (Startup Order)
 
-Роутеры `stats_router` и `tester_router` зависят от DI-фабрик `get_log_service`, `get_tester_service`, `get_http_client`. Все эти фабрики требуют, чтобы `PortkeyAdapter` был инициализирован в lifespan startup. FastAPI гарантирует завершение lifespan startup до приёма запросов, однако:
-- Необходимо добавить smoke-тест, проверяющий, что после запуска приложения вызов `get_http_client()` не возвращает ошибку.
-- Если lifespan startup завершился с ошибкой (адаптер не инициализирован), приложение НЕ должно принимать запросы.
-
----
-
-## 4. Подключение роутеров
-
-Приложение регистрирует следующие роутеры:
-
-**API-роуты (с префиксом `/api/`):**
-
-| Роутер             | Префикс           | Теги          | Условие подключения         |
-|--------------------|--------------------|---------------|-----------------------------|
-| chat_router        | `/api/chat`        | Chat          | Безусловно                  |
-| policies_router    | `/api/policies`    | Policies      | Безусловно                  |
-| webhook_router     | `/api/webhook`     | Webhook       | Безусловно                  |
-| logs_router        | `/api/logs`        | Logs          | Безусловно                  |
-| providers_router   | `/api/providers`   | Providers     | Безусловно                  |
-| stats_router       | (определён в роутере) | Stats      | Безусловно                  |
-| tester_router      | (определён в роутере) | Tester     | Только если `settings.enable_tester_console` = True |
-
-**UI-роуты (без префикса):**
-
-| Роутер             | Префикс | Теги |
-|--------------------|---------|------|
-| ui_pages_router    | `/`     | UI   |
-
-**Порядок подключения:** chat, policies, providers, webhook, logs, stats, tester (условно).
+Routers `stats_router` and `tester_router` depend on DI factories `get_log_service`, `get_tester_service`, `get_http_client`. All these factories require `PortkeyAdapter` to be initialized during lifespan startup. FastAPI guarantees completion of lifespan startup before accepting requests; however:
+- A smoke test must be added to verify that after application startup, calling `get_http_client()` does not return an error.
+- If lifespan startup fails (adapter not initialized), the application MUST NOT accept requests.
 
 ---
 
-## 5. Глобальный обработчик исключений
+## 4. Router Registration
 
-### 5.1. Обработка `GatewayError`
+The application registers the following routers:
 
-Если сервис вернул `GatewayError` и он не был обработан в роуте, глобальный обработчик перехватывает его и:
+**API routes (with `/api/` prefix):**
 
-1. Записывает полный текст ошибки и traceback в серверный лог.
-2. Возвращает клиенту JSON-ответ с HTTP-статусом из `GatewayError.status_code`:
-   - Поле `error_code` — значение из `GatewayError.error_code`.
-   - Поле `message` — значение из `GatewayError.message`.
-   - Поле `trace_id` — значение из `GatewayError.trace_id`.
+| Router             | Prefix             | Tags          | Registration Condition          |
+|--------------------|--------------------|--------------|---------------------------------|
+| chat_router        | `/api/chat`        | Chat          | Unconditional                   |
+| policies_router    | `/api/policies`    | Policies      | Unconditional                   |
+| webhook_router     | `/api/webhook`     | Webhook       | Unconditional                   |
+| logs_router        | `/api/logs`        | Logs          | Unconditional                   |
+| providers_router   | `/api/providers`   | Providers     | Unconditional                   |
+| stats_router       | (defined in router) | Stats        | Unconditional                   |
+| tester_router      | (defined in router) | Tester       | Only if `settings.enable_tester_console` = True |
 
-### 5.2. Обработка всех прочих исключений (защита от утечки информации)
+**UI routes (no prefix):**
 
-Глобальный обработчик перехватывает **все** необработанные исключения, не являющиеся `GatewayError`, и:
+| Router             | Prefix | Tags |
+|--------------------|--------|------|
+| ui_pages_router    | `/`    | UI   |
 
-1. Генерирует уникальный UUID (trace_id) для корреляции с серверным логом.
-2. Записывает в серверный лог **полный** текст исключения, traceback и сгенерированный trace_id (уровень ERROR).
-3. Возвращает клиенту JSON-ответ с HTTP 500, содержащий **только** типовое generic-сообщение:
-   - Поле `error_code` — значение `"UNKNOWN"`.
-   - Поле `message` — фиксированная строка `"Internal server error"` (без каких-либо деталей исключения, путей файлов, имён таблиц БД или внутренних URL).
-   - Поле `trace_id` — сгенерированный UUID для корреляции.
-4. **Категорически запрещено** передавать клиенту текстовое представление исключения, stack trace или любую внутреннюю информацию о системе.
-
-### 5.3. Обработка `ValidationError` (Pydantic)
-
-FastAPI обрабатывает автоматически → HTTP 422.
+**Registration order:** chat, policies, providers, webhook, logs, stats, tester (conditional).
 
 ---
 
-## 6. Безопасность (Attack Surface)
+## 5. Global Exception Handler
 
-Подключение роутеров добавляет эндпоинты, включая прокси к внешним API (`/api/tester/proxy`) и экспорт данных (`/api/logs/export`). Требования:
-- Все эндпоинты ДОЛЖНЫ иметь security-схему в OpenAPI-документации (HTTP Basic Auth).
-- Все эндпоинты ДОЛЖНЫ иметь явную пометку `deprecated=False` в OpenAPI.
-- Роутер `tester_router` ДОЛЖЕН быть отключаемым через feature flag `settings.enable_tester_console` (по умолчанию False в production).
+### 5.1. Handling `GatewayError`
+
+If a service returns a `GatewayError` and it is not handled in the route, the global handler intercepts it and:
+
+1. Writes the full error text and traceback to the server log.
+2. Returns a JSON response to the client with the HTTP status from `GatewayError.status_code`:
+   - Field `error_code` — value from `GatewayError.error_code`.
+   - Field `message` — value from `GatewayError.message`.
+   - Field `trace_id` — value from `GatewayError.trace_id`.
+
+### 5.2. Handling All Other Exceptions (Information Leakage Prevention)
+
+The global handler intercepts **all** unhandled exceptions that are not `GatewayError` and:
+
+1. Generates a unique UUID (trace_id) for correlation with the server log.
+2. Writes the **full** exception text, traceback, and generated trace_id to the server log (ERROR level).
+3. Returns a JSON response to the client with HTTP 500, containing **only** a generic message:
+   - Field `error_code` — value `"UNKNOWN"`.
+   - Field `message` — fixed string `"Internal server error"` (without any exception details, file paths, DB table names, or internal URLs).
+   - Field `trace_id` — generated UUID for correlation.
+4. It is **strictly prohibited** to transmit the exception text, stack trace, or any internal system information to the client.
+
+### 5.3. Handling `ValidationError` (Pydantic)
+
+FastAPI handles this automatically → HTTP 422.
 
 ---
 
-## 7. Обработка ошибок
+## 6. Security (Attack Surface)
 
-| Ситуация                        | Действие                                          |
+Router registration adds endpoints, including a proxy to external APIs (`/api/tester/proxy`) and data export (`/api/logs/export`). Requirements:
+- All endpoints MUST have a security scheme in the OpenAPI documentation (HTTP Basic Auth).
+- All endpoints MUST have an explicit `deprecated=False` annotation in OpenAPI.
+- The `tester_router` MUST be toggleable via the feature flag `settings.enable_tester_console` (default False in production).
+
+---
+
+## 7. Error Handling
+
+| Scenario                        | Action                                            |
 |---------------------------------|---------------------------------------------------|
-| Не удалось подключиться к БД    | Логировать CRITICAL, завершить процесс            |
-| Не найден `.env` файл           | Использовать значения по умолчанию + предупреждение|
-| Ошибка при создании таблиц      | Логировать CRITICAL, завершить процесс            |
+| Failed to connect to database   | Log CRITICAL, terminate process                   |
+| `.env` file not found           | Use default values + warning                      |
+| Error creating tables           | Log CRITICAL, terminate process                   |

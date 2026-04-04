@@ -1,13 +1,13 @@
 """
-TDD Red-фаза: тесты для абстрактного контракта GatewayProvider.
+TDD Red phase: тесты для абстрактного контракта GatewayProvider.
 
-Тестируемый модуль (из gateway_provider.py):
+Tested module (из gateway_provider.py):
   - GatewayProvider — абстрактный базовый класс (ABC), определяющий
     интерфейс для адаптеров внешних LLM-провайдеров.
 
-Спецификация: contracts_spec.md
+Specification: contracts_spec.md
 
-Проверяемые инварианты:
+Verified invariants:
   1. GatewayProvider наследует abc.ABC.
   2. Нельзя создать экземпляр GatewayProvider напрямую (TypeError).
   3. Абстрактное свойство provider_name (str).
@@ -33,7 +33,7 @@ from app.domain.dto.unified_response import UnifiedResponse
 
 
 # ==========================================================================
-# Фикстуры
+# Fixtures
 # ==========================================================================
 
 

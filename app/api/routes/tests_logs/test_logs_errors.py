@@ -2,7 +2,7 @@
 Тесты обработки ошибок для всех эндпоинтов логов.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md
+Specification: app/api/routes/logs_spec.md
 """
 
 import pytest

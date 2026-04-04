@@ -1,102 +1,102 @@
-# Спецификация: Система миграций базы данных (Alembic)
+# Specification: Database Migration System (Alembic)
 
-> **Слой:** Infrastructure (внешний мир — I/O)  
-> **Ответственность:** Версионирование и эволюция DDL-схемы базы данных через управляемые миграции  
-> **Связанные спецификации:** [`session_spec.md`](app/infrastructure/database/session_spec.md), [`models_spec.md`](app/infrastructure/database/models_spec.md)
-
----
-
-## 1. Общие правила
-
-- Управление схемой БД осуществляется **исключительно** через Alembic. Прямое создание или изменение таблиц из кода приложения запрещено.
-- Каждое изменение схемы (добавление таблицы, колонки, индекса, ограничения) оформляется как отдельная миграция с уникальной ревизией.
-- Миграции должны быть **идемпотентными**: повторное применение не должно приводить к ошибке.
-- Каждая миграция обязана содержать как прямое применение (upgrade), так и откат (downgrade).
+> **Layer:** Infrastructure (external world — I/O)  
+> **Responsibility:** Versioning and evolution of the database DDL schema via managed migrations  
+> **Related specifications:** [`session_spec.md`](app/infrastructure/database/session_spec.md), [`models_spec.md`](app/infrastructure/database/models_spec.md)
 
 ---
 
-## 2. Структура файлов и директорий
+## 1. General Rules
 
-### 2.1. Конфигурационный файл
-
-- Файл конфигурации Alembic располагается в **корне проекта** (на одном уровне с requirements.txt).
-- Содержит путь к директории миграций, строку подключения к БД и ссылку на файл окружения миграций.
-- Строка подключения к БД должна читаться из переменной окружения DATABASE_URL, а не быть захардкожена.
-
-### 2.2. Директория миграций
-
-- Все файлы миграций хранятся в директории `app/infrastructure/database/migrations`.
-- Внутри директории миграций находятся:
-  - Файл окружения миграций (env.py) — точка входа для Alembic.
-  - Шаблон для генерации новых ревизий (script.py.mako).
-  - Поддиректория `versions/` — содержит файлы отдельных миграций.
+- Database schema management is performed **exclusively** via Alembic. Direct table creation or modification from application code is prohibited.
+- Each schema change (adding a table, column, index, constraint) is formalized as a separate migration with a unique revision.
+- Migrations must be **idempotent**: repeated application must not cause an error.
+- Each migration must contain both a forward application (upgrade) and a rollback (downgrade).
 
 ---
 
-## 3. Асинхронный режим работы
+## 2. File and Directory Structure
 
-- Alembic должен работать в **асинхронном режиме**, используя асинхронный движок SQLAlchemy.
-- Файл окружения миграций (env.py) должен:
-  1. Создавать асинхронный движок на основе DATABASE_URL.
-  2. Запускать миграции внутри асинхронного контекста соединения.
-  3. Корректно закрывать движок после завершения миграций.
-- Для offline-режима (генерация SQL без подключения к БД) допускается синхронная работа с URL напрямую.
+### 2.1. Configuration File
 
----
+- The Alembic configuration file is located at the **project root** (at the same level as requirements.txt).
+- Contains the path to the migrations directory, the DB connection string, and a reference to the migration environment file.
+- The DB connection string must be read from the DATABASE_URL environment variable, not hardcoded.
 
-## 4. Автогенерация миграций
+### 2.2. Migrations Directory
 
-- Файл окружения миграций должен импортировать декларативный базовый класс (Base) из модуля моделей (`app/infrastructure/database/models.py`).
-- Метаданные этого базового класса передаются Alembic как целевые метаданные (target_metadata) для сравнения текущего состояния БД с описанием моделей.
-- Это позволяет использовать режим автогенерации миграций (флаг --autogenerate), при котором Alembic автоматически определяет разницу между моделями и текущей схемой БД.
-
----
-
-## 5. Импорт моделей
-
-- Перед передачей метаданных в Alembic необходимо убедиться, что **все** ORM-модели импортированы и зарегистрированы в реестре декларативного базового класса.
-- Файл окружения миграций должен явно импортировать модуль моделей, чтобы гарантировать регистрацию всех таблиц в метаданных.
-- При добавлении новых моделей в проект они должны быть доступны через единый модуль моделей — дополнительных правок в env.py не требуется.
+- All migration files are stored in the `app/infrastructure/database/migrations` directory.
+- Inside the migrations directory:
+  - Migration environment file (env.py) — entry point for Alembic.
+  - Template for generating new revisions (script.py.mako).
+  - `versions/` subdirectory — contains individual migration files.
 
 ---
 
-## 6. Соглашения по именованию миграций
+## 3. Async Operation Mode
 
-- Каждая миграция должна иметь осмысленное описание на английском языке (передаётся через флаг -m при генерации).
-- Формат описания: краткое действие + объект (например: "add users table", "add index on logs created_at").
-- Пустые миграции (без изменений в upgrade/downgrade) не допускаются в репозитории.
-
----
-
-## 7. Соглашения по именованию ограничений (Naming Convention)
-
-- Для обеспечения кроссплатформенной совместимости (SQLite, PostgreSQL) и корректной работы автогенерации миграций, декларативный базовый класс должен использовать явное соглашение об именовании ограничений (naming convention).
-- Правила именования должны покрывать: индексы, уникальные ограничения, проверочные ограничения, внешние ключи и первичные ключи.
-- Это требование реализуется на уровне моделей (см. [`models_spec.md`](app/infrastructure/database/models_spec.md)), но критично для корректной работы Alembic.
+- Alembic must operate in **async mode**, using the SQLAlchemy async engine.
+- The migration environment file (env.py) must:
+  1. Create an async engine based on DATABASE_URL.
+  2. Run migrations within an async connection context.
+  3. Properly close the engine after migrations complete.
+- For offline mode (SQL generation without DB connection), synchronous operation with the URL directly is acceptable.
 
 ---
 
-## 8. Интеграция с жизненным циклом приложения
+## 4. Migration Autogeneration
 
-- Alembic **не вызывается** автоматически при старте приложения (FastAPI lifespan).
-- Миграции применяются **вручную** оператором или через CI/CD-пайплайн перед деплоем.
-- Приложение при старте должно предполагать, что схема БД уже актуальна.
+- The migration environment file must import the declarative base class (Base) from the models module (`app/infrastructure/database/models.py`).
+- The metadata of this base class is passed to Alembic as target_metadata for comparing the current DB state with the model definitions.
+- This enables the autogeneration mode (--autogenerate flag), where Alembic automatically determines the difference between models and the current DB schema.
 
 ---
 
-## 9. Обработка ошибок
+## 5. Model Imports
 
-| Ситуация | Действие |
+- Before passing metadata to Alembic, ensure that **all** ORM models are imported and registered in the declarative base class registry.
+- The migration environment file must explicitly import the models module to guarantee registration of all tables in the metadata.
+- When adding new models to the project, they must be accessible through the single models module — no additional edits to env.py are required.
+
+---
+
+## 6. Migration Naming Conventions
+
+- Each migration must have a meaningful description in English (passed via the -m flag during generation).
+- Description format: brief action + object (e.g., "add users table", "add index on logs created_at").
+- Empty migrations (no changes in upgrade/downgrade) are not permitted in the repository.
+
+---
+
+## 7. Constraint Naming Conventions
+
+- For cross-platform compatibility (SQLite, PostgreSQL) and correct autogeneration of migrations, the declarative base class must use an explicit constraint naming convention.
+- Naming rules must cover: indexes, unique constraints, check constraints, foreign keys, and primary keys.
+- This requirement is implemented at the models level (see [`models_spec.md`](app/infrastructure/database/models_spec.md)), but is critical for correct Alembic operation.
+
+---
+
+## 8. Integration with Application Lifecycle
+
+- Alembic is **not invoked** automatically at application startup (FastAPI lifespan).
+- Migrations are applied **manually** by the operator or via CI/CD pipeline before deployment.
+- The application at startup must assume that the DB schema is already up to date.
+
+---
+
+## 9. Error Handling
+
+| Scenario | Action |
 |---|---|
-| Несовместимая ревизия (head conflict) | Разрешение конфликта вручную через merge-ревизию |
-| Ошибка подключения к БД при миграции | Alembic завершается с ненулевым кодом возврата; оператор анализирует лог |
-| Откат миграции невозможен (необратимая операция) | Функция downgrade должна явно выбрасывать исключение с пояснением |
-| Рассинхронизация моделей и схемы | Обнаруживается через автогенерацию; пустая миграция сигнализирует об отсутствии расхождений |
+| Incompatible revision (head conflict) | Manual resolution via merge revision |
+| DB connection error during migration | Alembic exits with non-zero return code; operator analyzes the log |
+| Rollback impossible (irreversible operation) | The downgrade function must explicitly raise an exception with explanation |
+| Model-schema desynchronization | Detected via autogeneration; an empty migration signals no discrepancies |
 
 ---
 
-## 10. Безопасность
+## 10. Security
 
-- Строка подключения к БД никогда не хранится в файле конфигурации Alembic в открытом виде. Используется подстановка из переменных окружения.
-- Файлы миграций (директория versions/) коммитятся в систему контроля версий. Файл конфигурации Alembic — тоже, но без секретов.
-- Локальные базы данных (файлы SQLite) исключены из системы контроля версий через .gitignore.
+- The DB connection string is never stored in the Alembic configuration file in plain text. Environment variable substitution is used.
+- Migration files (versions/ directory) are committed to version control. The Alembic configuration file is also committed, but without secrets.
+- Local databases (SQLite files) are excluded from version control via .gitignore.

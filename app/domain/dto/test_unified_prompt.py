@@ -1,12 +1,12 @@
 """
-TDD Red-фаза: тесты для Pydantic-моделей DTO UnifiedPrompt и MessageItem.
+TDD Red phase: тесты для Pydantic-моделей DTO UnifiedPrompt и MessageItem.
 
-Тестируемые модели (из unified_prompt.py):
+Tested models (из unified_prompt.py):
   - MessageItem — вложенная frozen Pydantic V2 модель сообщения диалога.
   - UnifiedPrompt — frozen Pydantic V2 DTO для стандартизированного
     представления запроса пользователя к LLM-провайдеру.
 
-Спецификация: unified_prompt_spec.md
+Specification: unified_prompt_spec.md
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from app.domain.dto.unified_prompt import MessageItem, UnifiedPrompt
 
 
 # ==========================================================================
-# Фикстуры
+# Fixtures
 # ==========================================================================
 
 
@@ -371,7 +371,7 @@ class TestUnifiedPromptMaxTokens:
         assert UnifiedPrompt(**{**valid_data, "max_tokens": val}).max_tokens == val
 
     def test_zero_rejected(self, valid_data: dict) -> None:
-        """[SRE_MARKER] — max_tokens=0 бессмысленно, пустой ответ провайдера."""
+        """[SRE_MARKER] — max_tokens=0 бессмысленно, пустой ответ a provider."""
         with pytest.raises(ValidationError):
             UnifiedPrompt(**{**valid_data, "max_tokens": 0})
 

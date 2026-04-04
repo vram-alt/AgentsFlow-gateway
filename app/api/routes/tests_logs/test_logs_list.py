@@ -2,7 +2,7 @@
 Тесты для GET /api/logs/ — постраничный список событий.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md
+Specification: app/api/routes/logs_spec.md
 """
 
 import pytest
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 
 class TestGetLogsList:
-    """Тесты для GET /api/logs/ — постраничный список событий."""
+    """Tests for GET /api/logs/ — постраничный список событий."""
 
     def test_get_logs_default_params_returns_200(
         self, client: TestClient, mock_log_service: MagicMock, auth_headers: dict

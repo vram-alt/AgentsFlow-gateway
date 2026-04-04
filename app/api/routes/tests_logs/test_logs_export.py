@@ -2,7 +2,7 @@
 Тесты для GET /api/logs/export — CSV-экспорт.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md (upgrade §2)
+Specification: app/api/routes/logs_spec.md (upgrade §2)
 """
 
 import pytest
@@ -20,7 +20,7 @@ from app.api.dependencies.di import get_log_service
 
 
 class TestGetLogsExport:
-    """Тесты для нового эндпоинта GET /api/logs/export (upgrade spec §2)."""
+    """Tests for нового эндпоинта GET /api/logs/export (upgrade spec §2)."""
 
     @pytest.fixture()
     def export_client(self, mock_log_service: MagicMock) -> TestClient:
@@ -66,7 +66,7 @@ class TestGetLogsExport:
     def test_export_has_content_disposition(
         self, export_client: TestClient, mock_log_service: MagicMock, auth_headers: dict
     ):
-        """Заголовок Content-Disposition = attachment; filename=logs_export.csv."""
+        """Header Content-Disposition = attachment; filename=logs_export.csv."""
 
         async def _empty_gen(*args, **kwargs):
             yield "id,trace_id,event_type,created_at,payload\n"

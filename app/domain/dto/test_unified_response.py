@@ -1,12 +1,12 @@
 """
-TDD Red-фаза: тесты для Pydantic-моделей DTO UnifiedResponse и UsageInfo.
+TDD Red phase: тесты для Pydantic-моделей DTO UnifiedResponse и UsageInfo.
 
-Тестируемые модели (из unified_response.py):
+Tested models (из unified_response.py):
   - UsageInfo — вложенная frozen Pydantic V2 модель статистики токенов.
   - UnifiedResponse — frozen Pydantic V2 DTO для стандартизированного
     представления ответа от LLM-провайдера.
 
-Спецификация: unified_response_spec.md
+Specification: unified_response_spec.md
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ from app.domain.dto.unified_response import UnifiedResponse, UsageInfo
 
 
 # ==========================================================================
-# Фикстуры
+# Fixtures
 # ==========================================================================
 
 
@@ -308,7 +308,7 @@ class TestUnifiedResponseContent:
             UnifiedResponse(trace_id=valid_trace_id, model="gpt-4o")
 
     def test_empty_string_accepted(self, valid_data: dict) -> None:
-        """Спецификация: content может быть пустой строкой (если заблокирован Guardrail)."""
+        """Specification: content может быть пустой строкой (если заблокирован Guardrail)."""
         r = UnifiedResponse(**{**valid_data, "content": ""})
         assert r.content == ""
 

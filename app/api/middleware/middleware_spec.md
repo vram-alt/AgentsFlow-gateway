@@ -1,74 +1,74 @@
-# Спецификация: Middleware (Промежуточное ПО)
+# Specification: Middleware
 
-> **Файл реализации:** `auth.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** Аутентификация и авторизация запросов
-
----
-
-## 1. Общие правила
-
-- Middleware реализуется как FastAPI `Depends`-функции (не как ASGI middleware).
-- Конфигурация (логины, пароли, токены) читается из переменных окружения.
-- Middleware **не содержит** бизнес-логики.
+> **Implementation file:** `auth.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** Request authentication and authorization
 
 ---
 
-## 2. Модуль: auth.py
+## 1. General Rules
 
-### 2.1. Функция: verify_basic_auth
-
-**Назначение:** Проверка HTTP Basic Auth для защиты UI и API-эндпоинтов.
-
-**Входные данные:** Учётные данные (username, password), извлечённые из HTTP-заголовка `Authorization: Basic ...` через встроенный механизм FastAPI HTTP Basic.
-
-**Возвращаемое значение:** Строка — имя пользователя (username) при успешной аутентификации.
-
-**Пошаговая логика:**
-
-1. Извлечь `username` и `password` из HTTP-заголовка `Authorization: Basic ...`.
-2. Сравнить с `ADMIN_USERNAME` и `ADMIN_PASSWORD` из переменных окружения.
-3. Использовать безопасное сравнение строк с защитой от timing-атак.
-4. Если совпадают → сбросить счётчик неудачных попыток для данного IP-адреса и вернуть `username`.
-5. Если не совпадают → увеличить счётчик неудачных попыток для IP-адреса клиента и вернуть HTTP 401 с заголовком `WWW-Authenticate: Basic`.
-
-### 2.3. Механизм защиты от перебора (Rate Limiting)
-
-**Назначение:** Предотвращение brute-force атак на эндпоинты аутентификации.
-
-**Правила:**
-
-- Реализовать in-memory rate limiter, отслеживающий количество неудачных попыток аутентификации по IP-адресу клиента.
-- Лимит: максимум 5 неудачных попыток за скользящее окно в 60 секунд на один IP-адрес.
-- При превышении лимита — немедленно возвращать HTTP 429 Too Many Requests **до** проверки учётных данных (чтобы не давать обратную связь о валидности пароля).
-- Записи о заблокированных IP автоматически истекают по TTL (60 секунд с момента первой неудачной попытки в окне).
-- При успешной аутентификации — сбрасывать счётчик для данного IP.
-- Rate limiter применяется к функциям `verify_basic_auth` и `verify_webhook_secret`.
-
-### 2.2. Функция: verify_webhook_secret
-
-**Назначение:** Проверка статического токена для webhook-эндпоинта (Anti-Spam).
-
-**Входные данные:** Значение HTTP-заголовка `X-Webhook-Secret` (обязательный заголовок).
-
-**Возвращаемое значение:** Булево `True` при успешной проверке.
-
-**Пошаговая логика:**
-
-1. Извлечь значение заголовка `X-Webhook-Secret`.
-2. Сравнить с `WEBHOOK_SECRET` из переменных окружения.
-3. Использовать безопасное сравнение строк с защитой от timing-атак.
-4. Если совпадает → вернуть `True`.
-5. Если не совпадает → вернуть HTTP 401 с сообщением `"Invalid webhook secret"`.
+- Middleware is implemented as FastAPI `Depends` functions (not as ASGI middleware).
+- Configuration (logins, passwords, tokens) is read from environment variables.
+- Middleware **does not contain** business logic.
 
 ---
 
-## 3. Обработка ошибок
+## 2. Module: auth.py
 
-| Ситуация                        | Действие                                          |
+### 2.1. Function: verify_basic_auth
+
+**Purpose:** Verify HTTP Basic Auth for protecting UI and API endpoints.
+
+**Input:** Credentials (username, password) extracted from the `Authorization: Basic ...` HTTP header via FastAPI's built-in HTTP Basic mechanism.
+
+**Return value:** String — the username on successful authentication.
+
+**Step-by-step logic:**
+
+1. Extract `username` and `password` from the `Authorization: Basic ...` HTTP header.
+2. Compare with `ADMIN_USERNAME` and `ADMIN_PASSWORD` from environment variables.
+3. Use constant-time string comparison for timing attack protection.
+4. If they match → reset the failed attempt counter for the given IP address and return `username`.
+5. If they don't match → increment the failed attempt counter for the client IP address and return HTTP 401 with `WWW-Authenticate: Basic` header.
+
+### 2.3. Brute-Force Protection Mechanism (Rate Limiting)
+
+**Purpose:** Prevent brute-force attacks on authentication endpoints.
+
+**Rules:**
+
+- Implement an in-memory rate limiter tracking the number of failed authentication attempts per client IP address.
+- Limit: maximum 5 failed attempts within a 60-second sliding window per IP address.
+- On limit exceeded — immediately return HTTP 429 Too Many Requests **before** checking credentials (to avoid providing feedback on password validity).
+- Records for blocked IPs automatically expire by TTL (60 seconds from the first failed attempt in the window).
+- On successful authentication — reset the counter for the given IP.
+- The rate limiter applies to both `verify_basic_auth` and `verify_webhook_secret` functions.
+
+### 2.2. Function: verify_webhook_secret
+
+**Purpose:** Verify a static token for the webhook endpoint (Anti-Spam).
+
+**Input:** Value of the `X-Webhook-Secret` HTTP header (required header).
+
+**Return value:** Boolean `True` on successful verification.
+
+**Step-by-step logic:**
+
+1. Extract the `X-Webhook-Secret` header value.
+2. Compare with `WEBHOOK_SECRET` from environment variables.
+3. Use constant-time string comparison for timing attack protection.
+4. If they match → return `True`.
+5. If they don't match → return HTTP 401 with message `"Invalid webhook secret"`.
+
+---
+
+## 3. Error Handling
+
+| Scenario                        | Action                                            |
 |---------------------------------|---------------------------------------------------|
-| Отсутствует заголовок Auth      | HTTP 401 с `WWW-Authenticate: Basic`              |
-| Неверные credentials            | HTTP 401 с `WWW-Authenticate: Basic`              |
-| Превышен лимит попыток (brute-force) | HTTP 429 Too Many Requests                   |
-| Отсутствует X-Webhook-Secret    | HTTP 422 (FastAPI автоматически — Header required) |
-| Неверный webhook secret         | HTTP 401 `Invalid webhook secret`                 |
+| Missing Auth header             | HTTP 401 with `WWW-Authenticate: Basic`           |
+| Invalid credentials             | HTTP 401 with `WWW-Authenticate: Basic`           |
+| Attempt limit exceeded (brute-force) | HTTP 429 Too Many Requests                   |
+| Missing X-Webhook-Secret        | HTTP 422 (FastAPI automatic — Header required)    |
+| Invalid webhook secret          | HTTP 401 `Invalid webhook secret`                 |

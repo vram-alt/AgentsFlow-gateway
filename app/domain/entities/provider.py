@@ -1,4 +1,4 @@
-"""Доменная сущность Provider — Pydantic-модели для LLM-провайдера."""
+"""Domain entity Provider — Pydantic models for an LLM provider."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from app.domain.utils.time import _utc_now
 
 
 class ProviderBase(BaseModel):
-    """Базовая схема с общими полями и валидацией."""
+    """Base schema with shared fields and validation."""
 
     name: str = Field(..., min_length=1, max_length=100)
     api_key: str = Field(..., min_length=1)
@@ -34,11 +34,11 @@ class ProviderBase(BaseModel):
 
 
 class ProviderCreate(ProviderBase):
-    """Схема для создания провайдера (все обязательные поля из Base)."""
+    """Schema for creating a provider (all required fields from Base)."""
 
 
 class ProviderUpdate(BaseModel):
-    """Схема для частичного обновления (PATCH). Все поля опциональны."""
+    """Schema for partial update (PATCH). All fields are optional."""
 
     name: Optional[str] = Field(default=None, min_length=1, max_length=100)
     api_key: Optional[str] = Field(default=None, min_length=1)
@@ -61,7 +61,7 @@ class ProviderUpdate(BaseModel):
 
 
 class Provider(ProviderBase):
-    """Полная доменная сущность с id и временными метками."""
+    """Complete domain entity with id and timestamps."""
 
     model_config = ConfigDict(from_attributes=True)
 

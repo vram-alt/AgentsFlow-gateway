@@ -1,4 +1,4 @@
-"""Доменная сущность LogEntry — единая полиморфная запись аудита."""
+"""Domain entity LogEntry — unified polymorphic audit record."""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # --------------------------------------------------------------------------
-# UUID v4 формат: 8-4-4-4-12 hex символов с дефисами (36 символов)
+# UUID v4 format: 8-4-4-4-12 hex characters with hyphens (36 characters)
 # --------------------------------------------------------------------------
 _UUID_V4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
@@ -18,7 +18,7 @@ _UUID_V4_RE = re.compile(
 
 
 class EventType(str, Enum):
-    """Строковое перечисление типов событий аудит-лога."""
+    """String enumeration of audit log event types."""
 
     CHAT_REQUEST = "chat_request"
     GUARDRAIL_INCIDENT = "guardrail_incident"
@@ -26,7 +26,7 @@ class EventType(str, Enum):
 
 
 class LogEntryCreate(BaseModel):
-    """Схема для создания записи лога (без id и created_at)."""
+    """Schema for creating a log record (without id and created_at)."""
 
     trace_id: str
     event_type: EventType
@@ -35,7 +35,7 @@ class LogEntryCreate(BaseModel):
     @field_validator("trace_id")
     @classmethod
     def _validate_trace_id(cls, v: str) -> str:
-        """[SRE_MARKER] — невалидный trace_id сломает корреляцию логов."""
+        """[SRE_MARKER] — invalid trace_id will break log correlation."""
         if not _UUID_V4_RE.match(v):
             raise ValueError(
                 "trace_id must be a valid UUID v4 string (36 chars with dashes)"
@@ -45,7 +45,7 @@ class LogEntryCreate(BaseModel):
     @field_validator("payload")
     @classmethod
     def _validate_payload_not_empty(cls, v: dict[str, Any]) -> dict[str, Any]:
-        """[SRE_MARKER] — пустой payload в аудит-логе бесполезен."""
+        """[SRE_MARKER] — empty payload in an audit log is useless."""
         if len(v) == 0:
             raise ValueError("payload must contain at least one key")
         return v
@@ -55,7 +55,7 @@ from app.domain.utils.time import _utc_now
 
 
 class LogEntry(LogEntryCreate):
-    """Полная доменная сущность аудит-лога (иммутабельная)."""
+    """Complete audit log domain entity (immutable)."""
 
     model_config = ConfigDict(from_attributes=True)
 

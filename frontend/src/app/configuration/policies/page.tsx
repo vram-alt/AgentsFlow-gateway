@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useEffect, useState } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -24,9 +24,24 @@ import {
     Loader2,
     CloudDownload,
     AlertTriangle,
-    FileJson,
+    Eye,
+    Power,
+    X,
 } from "lucide-react";
-import { api, type Policy } from "@/lib/api-client";
+import { api, ApiError, type Policy } from "@/lib/api-client";
+
+/** Extract a human-readable message from any caught error. */
+function humanError(err: unknown): string {
+    if (err instanceof ApiError) return err.message;
+    if (err instanceof TypeError) {
+        if (err.message.includes("fetch") || err.message.includes("network") || err.message.includes("Failed")) {
+            return "Network error — unable to reach the server. Please check your connection and try again.";
+        }
+        return `Unexpected client error: ${err.message}`;
+    }
+    if (err instanceof Error) return err.message;
+    return "An unexpected error occurred. Please try again later.";
+}
 
 export default function PoliciesPage() {
     const [policies, setPolicies] = useState<Policy[]>([]);
@@ -42,14 +57,19 @@ export default function PoliciesPage() {
     });
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
+    const [pageError, setPageError] = useState<string | null>(null);
+    const [deleteLoading, setDeleteLoading] = useState(false);
+    const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
 
     const fetchPolicies = async () => {
         setLoading(true);
+        setPageError(null);
         try {
             const data = await api.listPolicies();
             setPolicies(Array.isArray(data) ? data : []);
-        } catch {
+        } catch (err: unknown) {
             setPolicies([]);
+            setPageError(humanError(err));
         } finally {
             setLoading(false);
         }
@@ -61,7 +81,7 @@ export default function PoliciesPage() {
 
     const openCreate = () => {
         setEditingPolicy(null);
-        setFormData({ name: "", body: "{}", provider_name: "portkey" });
+        setFormData({ name: "", body: '{\n  "checks": [],\n  "actions": [\n    {\n      "type": "block",\n      "message": "Request blocked by guardrail"\n    }\n  ]\n}', provider_name: "portkey" });
         setError(null);
         setDialogOpen(true);
     };
@@ -112,22 +132,38 @@ export default function PoliciesPage() {
     };
 
     const handleDelete = async (id: number) => {
+        setDeleteLoading(true);
+        setPageError(null);
         try {
             await api.deletePolicy(id);
             setDeleteConfirm(null);
             fetchPolicies();
-        } catch {
-            // silently fail
+        } catch (err: unknown) {
+            setDeleteConfirm(null);
+            setPageError(`Failed to delete policy: ${humanError(err)}`);
+        } finally {
+            setDeleteLoading(false);
+        }
+    };
+
+    const handleToggle = async (id: number) => {
+        setPageError(null);
+        try {
+            await api.togglePolicy(id);
+            fetchPolicies();
+        } catch (err: unknown) {
+            setPageError(`Failed to toggle policy: ${humanError(err)}`);
         }
     };
 
     const handleSync = async () => {
         setSyncLoading(true);
+        setPageError(null);
         try {
             await api.syncPolicies("portkey");
             fetchPolicies();
-        } catch {
-            // silently fail
+        } catch (err: unknown) {
+            setPageError(`Sync failed: ${humanError(err)}`);
         } finally {
             setSyncLoading(false);
         }
@@ -135,6 +171,7 @@ export default function PoliciesPage() {
 
     return (
         <div className="space-y-6 animate-fade-in">
+            {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Policies</h1>
@@ -160,90 +197,137 @@ export default function PoliciesPage() {
                 </div>
             </div>
 
-            {/* Policies Grid */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {loading && (
-                    <div className="col-span-full flex justify-center py-12">
-                        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                    </div>
-                )}
-                {!loading && policies.length === 0 && (
-                    <div className="col-span-full text-center py-12">
-                        <Shield className="w-12 h-12 mx-auto mb-4 text-muted-foreground opacity-30" />
-                        <p className="text-muted-foreground">No policies configured</p>
-                        <div className="flex gap-2 justify-center mt-4">
-                            <Button size="sm" onClick={openCreate}>
-                                <Plus className="w-4 h-4 mr-2" />
-                                Create policy
-                            </Button>
-                            <Button size="sm" variant="outline" onClick={handleSync}>
-                                <CloudDownload className="w-4 h-4 mr-2" />
-                                Sync from cloud
-                            </Button>
-                        </div>
-                    </div>
-                )}
-                {!loading &&
-                    policies.map((policy) => (
-                        <Card
-                            key={policy.id}
-                            className="hover:border-primary/30 transition-colors group"
-                        >
-                            <CardHeader className="pb-3">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className="p-2 rounded-lg bg-accent/10">
-                                            <Shield className="w-5 h-5 text-accent" />
-                                        </div>
-                                        <div>
-                                            <CardTitle className="text-base">{policy.name}</CardTitle>
-                                            <div className="flex gap-1 mt-1">
-                                                <Badge
-                                                    variant={policy.is_active ? "success" : "secondary"}
-                                                >
-                                                    {policy.is_active ? "Active" : "Inactive"}
-                                                </Badge>
+            {/* Page Error Banner */}
+            {pageError && (
+                <div className="flex items-center gap-3 p-4 rounded-lg border border-destructive/50 bg-destructive/10 text-destructive">
+                    <AlertTriangle className="w-5 h-5 shrink-0" />
+                    <p className="text-sm font-medium">{pageError}</p>
+                    <button
+                        onClick={() => setPageError(null)}
+                        className="ml-auto p-1 rounded hover:bg-destructive/20 cursor-pointer"
+                    >
+                        <X className="w-4 h-4" />
+                    </button>
+                </div>
+            )}
+
+            {/* Policies Table */}
+            <Card>
+                <CardContent className="p-0">
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-border">
+                                    <th className="text-left p-4 text-muted-foreground font-medium">Name</th>
+                                    <th className="text-left p-4 text-muted-foreground font-medium">Provider</th>
+                                    <th className="text-left p-4 text-muted-foreground font-medium">Status</th>
+                                    <th className="text-left p-4 text-muted-foreground font-medium">Rules</th>
+                                    <th className="text-left p-4 text-muted-foreground font-medium">Updated</th>
+                                    <th className="text-right p-4 text-muted-foreground font-medium">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {loading && (
+                                    <tr>
+                                        <td colSpan={6} className="p-8 text-center">
+                                            <Loader2 className="w-6 h-6 animate-spin mx-auto text-muted-foreground" />
+                                        </td>
+                                    </tr>
+                                )}
+                                {!loading && policies.length === 0 && (
+                                    <tr>
+                                        <td colSpan={6} className="p-8 text-center text-muted-foreground">
+                                            <Shield className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                                            <p>No policies configured</p>
+                                            <Button size="sm" className="mt-3" onClick={openCreate}>
+                                                <Plus className="w-4 h-4 mr-2" />
+                                                Create policy
+                                            </Button>
+                                        </td>
+                                    </tr>
+                                )}
+                                {!loading &&
+                                    policies.map((policy) => (
+                                        <tr
+                                            key={policy.id}
+                                            className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${!policy.is_active ? "opacity-60" : ""}`}
+                                        >
+                                            <td className="p-4">
+                                                <div className="flex items-center gap-3">
+                                                    <div className={`p-1.5 rounded-lg ${policy.is_active ? "bg-accent/10" : "bg-muted"}`}>
+                                                        <Shield className={`w-4 h-4 ${policy.is_active ? "text-accent" : "text-muted-foreground"}`} />
+                                                    </div>
+                                                    <span className={`font-medium ${!policy.is_active ? "text-muted-foreground" : ""}`}>
+                                                        {policy.name}
+                                                    </span>
+                                                </div>
+                                            </td>
+                                            <td className="p-4">
                                                 <Badge variant="outline" className="text-xs">
                                                     {policy.provider_name}
                                                 </Badge>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8"
-                                            onClick={() => openEdit(policy)}
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-destructive"
-                                            onClick={() => setDeleteConfirm(policy.id)}
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </Button>
-                                    </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent>
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                                    <FileJson className="w-3.5 h-3.5" />
-                                    <span>{Object.keys(policy.body).length} rules</span>
-                                </div>
-                                <pre className="p-2 rounded bg-secondary text-xs font-mono overflow-hidden max-h-20 text-muted-foreground">
-                                    {JSON.stringify(policy.body, null, 2)}
-                                </pre>
-                                <div className="text-xs text-muted-foreground pt-2">
-                                    Updated {new Date(policy.updated_at).toLocaleDateString()}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
-            </div>
+                                            </td>
+                                            <td className="p-4">
+                                                <Badge variant={policy.is_active ? "success" : "secondary"}>
+                                                    {policy.is_active ? "Active" : "Inactive"}
+                                                </Badge>
+                                            </td>
+                                            <td className="p-4 text-muted-foreground">
+                                                {Object.keys(policy.body).length} rules
+                                            </td>
+                                            <td className="p-4 text-xs text-muted-foreground">
+                                                {new Date(policy.updated_at).toLocaleString()}
+                                            </td>
+                                            <td className="p-4 text-right">
+                                                <div className="flex items-center justify-end gap-1">
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className={`h-8 w-8 ${policy.is_active
+                                                                ? "text-green-500 hover:text-red-500"
+                                                                : "text-muted-foreground hover:text-green-500"
+                                                            }`}
+                                                        onClick={() => handleToggle(policy.id)}
+                                                        title={policy.is_active ? "Deactivate policy" : "Activate policy"}
+                                                    >
+                                                        <Power className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8"
+                                                        onClick={() => setSelectedPolicy(policy)}
+                                                        title="View details"
+                                                    >
+                                                        <Eye className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8"
+                                                        onClick={() => openEdit(policy)}
+                                                        title="Edit policy"
+                                                    >
+                                                        <Pencil className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                    <Button
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="h-8 w-8 text-destructive"
+                                                        onClick={() => setDeleteConfirm(policy.id)}
+                                                        title="Delete policy"
+                                                    >
+                                                        <Trash2 className="w-3.5 h-3.5" />
+                                                    </Button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </CardContent>
+            </Card>
 
             {/* Create/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
@@ -292,7 +376,7 @@ export default function PoliciesPage() {
                                 value={formData.body}
                                 onChange={(e) => setFormData({ ...formData, body: e.target.value })}
                                 className="font-mono text-xs h-48"
-                                placeholder='{"rules": [...]}'
+                                placeholder='{"checks": [...], "actions": [{"type": "block", "message": "Blocked"}]}'
                             />
                         </div>
                     </div>
@@ -324,12 +408,84 @@ export default function PoliciesPage() {
                         <Button
                             variant="destructive"
                             onClick={() => deleteConfirm !== null && handleDelete(deleteConfirm)}
+                            disabled={deleteLoading}
                         >
+                            {deleteLoading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                             Delete
                         </Button>
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Detail Modal — large */}
+            {selectedPolicy && (
+                <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+                    <div className="bg-card border border-border rounded-xl w-full max-w-3xl max-h-[85vh] overflow-hidden">
+                        <div className="flex items-center justify-between p-5 border-b border-border">
+                            <div className="flex items-center gap-3">
+                                <div className={`p-2 rounded-lg ${selectedPolicy.is_active ? "bg-accent/10" : "bg-muted"}`}>
+                                    <Shield className={`w-5 h-5 ${selectedPolicy.is_active ? "text-accent" : "text-muted-foreground"}`} />
+                                </div>
+                                <div>
+                                    <h3 className="font-semibold text-lg">{selectedPolicy.name}</h3>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <Badge variant={selectedPolicy.is_active ? "success" : "secondary"}>
+                                            {selectedPolicy.is_active ? "Active" : "Inactive"}
+                                        </Badge>
+                                        <Badge variant="outline" className="text-xs">
+                                            {selectedPolicy.provider_name}
+                                        </Badge>
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setSelectedPolicy(null)}
+                                className="p-1.5 rounded-lg hover:bg-secondary cursor-pointer"
+                            >
+                                <X className="w-5 h-5" />
+                            </button>
+                        </div>
+                        <div className="p-5 overflow-y-auto max-h-[calc(85vh-5rem)] space-y-5">
+                            <div className="grid grid-cols-2 gap-5">
+                                <div className="p-4 rounded-lg bg-secondary/30">
+                                    <label className="text-xs text-muted-foreground uppercase tracking-wider">Created At</label>
+                                    <p className="text-sm font-medium mt-1">{new Date(selectedPolicy.created_at).toLocaleString()}</p>
+                                </div>
+                                <div className="p-4 rounded-lg bg-secondary/30">
+                                    <label className="text-xs text-muted-foreground uppercase tracking-wider">Updated At</label>
+                                    <p className="text-sm font-medium mt-1">{new Date(selectedPolicy.updated_at).toLocaleString()}</p>
+                                </div>
+                            </div>
+                            <div>
+                                <label className="text-xs text-muted-foreground uppercase tracking-wider">Policy Body (JSON)</label>
+                                <pre className="mt-2 p-5 rounded-lg bg-secondary text-xs font-mono overflow-auto max-h-[50vh] leading-relaxed whitespace-pre-wrap break-words">
+                                    {JSON.stringify(selectedPolicy.body, null, 2)}
+                                </pre>
+                            </div>
+                            <div className="flex justify-end gap-2 pt-2">
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                        setSelectedPolicy(null);
+                                        openEdit(selectedPolicy);
+                                    }}
+                                >
+                                    <Pencil className="w-3.5 h-3.5 mr-2" />
+                                    Edit
+                                </Button>
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => setSelectedPolicy(null)}
+                                >
+                                    Close
+                                </Button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            )}
         </div>
     );
 }

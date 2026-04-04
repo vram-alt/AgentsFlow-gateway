@@ -1,7 +1,7 @@
 """
-Модульные тесты для роутера политик безопасности (policies.py).
+Unit tests for роутера политик безопасности (policies.py).
 
-Спецификация: app/api/routes/policies_spec.md
+Specification: app/api/routes/policies_spec.md
 Фаза: TDD Red — тесты должны падать до реализации роутера.
 
 Тестируемые эндпоинты:
@@ -28,7 +28,7 @@ from app.domain.dto.gateway_error import GatewayError
 
 
 # ─────────────────────────────────────────────────────────
-# Хелперы
+# Helpers
 # ─────────────────────────────────────────────────────────
 
 FAKE_TRACE_ID = str(uuid.uuid4())
@@ -64,7 +64,7 @@ def _make_fake_policy(
 
 
 # ─────────────────────────────────────────────────────────
-# Фикстуры
+# Fixtures
 # ─────────────────────────────────────────────────────────
 
 
@@ -108,7 +108,7 @@ def client(mock_policy_service: MagicMock) -> TestClient:
 
 
 class TestListPolicies:
-    """Тесты для GET /api/policies/ — список политик."""
+    """Tests for GET /api/policies/ — список политик."""
 
     def test_list_policies_returns_200(
         self, client: TestClient, mock_policy_service: MagicMock
@@ -156,7 +156,7 @@ class TestListPolicies:
 
 
 class TestCreatePolicy:
-    """Тесты для POST /api/policies/ — создание политики."""
+    """Tests for POST /api/policies/ — создание a policy."""
 
     def test_create_policy_returns_201(
         self, client: TestClient, mock_policy_service: MagicMock
@@ -176,7 +176,7 @@ class TestCreatePolicy:
     def test_create_policy_with_provider_name(
         self, client: TestClient, mock_policy_service: MagicMock
     ):
-        """Создание с явным provider_name — HTTP 201."""
+        """Creation of с явным provider_name — HTTP 201."""
         mock_policy_service.create_policy.return_value = _make_fake_policy()
 
         payload = {
@@ -210,7 +210,7 @@ class TestCreatePolicy:
     def test_create_policy_returns_body_with_policy_data(
         self, client: TestClient, mock_policy_service: MagicMock
     ):
-        """Ответ содержит данные созданной политики."""
+        """Ответ содержит данные созданной a policy."""
         fake = _make_fake_policy(policy_id=42, name="created-policy")
         mock_policy_service.create_policy.return_value = fake
 
@@ -261,7 +261,7 @@ class TestCreatePolicy:
         assert response.status_code == 422
 
     def test_create_policy_body_not_dict_returns_422(self, client: TestClient):
-        """body должен быть словарём, строка — HTTP 422."""
+        """body must be a dict, строка — HTTP 422."""
         payload = {
             "name": "test-policy",
             "body": "not-a-dict",
@@ -324,7 +324,7 @@ class TestCreatePolicy:
 
 
 class TestUpdatePolicy:
-    """Тесты для PUT /api/policies/{policy_id} — обновление политики."""
+    """Tests for PUT /api/policies/{policy_id} — обновление a policy."""
 
     def test_update_policy_returns_200(
         self, client: TestClient, mock_policy_service: MagicMock
@@ -343,7 +343,7 @@ class TestUpdatePolicy:
     def test_update_policy_with_name_only(
         self, client: TestClient, mock_policy_service: MagicMock
     ):
-        """Обновление только name — HTTP 200."""
+        """Update only name — HTTP 200."""
         mock_policy_service.update_policy.return_value = _make_fake_policy(
             name="new-name"
         )
@@ -356,7 +356,7 @@ class TestUpdatePolicy:
     def test_update_policy_with_body_only(
         self, client: TestClient, mock_policy_service: MagicMock
     ):
-        """Обновление только body — HTTP 200."""
+        """Update only body — HTTP 200."""
         new_body = {"type": "guardrail", "rules": [{"check": "toxicity"}]}
         mock_policy_service.update_policy.return_value = _make_fake_policy(
             body=new_body
@@ -453,7 +453,7 @@ class TestUpdatePolicy:
 
 
 class TestDeletePolicy:
-    """Тесты для DELETE /api/policies/{policy_id} — удаление политики."""
+    """Tests for DELETE /api/policies/{policy_id} — удаление a policy."""
 
     def test_delete_policy_returns_200(
         self, client: TestClient, mock_policy_service: MagicMock
@@ -534,7 +534,7 @@ class TestDeletePolicy:
 
 
 class TestSyncPolicies:
-    """Тесты для POST /api/policies/sync — синхронизация политик."""
+    """Tests for POST /api/policies/sync — синхронизация политик."""
 
     def test_sync_policies_returns_200(
         self, client: TestClient, mock_policy_service: MagicMock

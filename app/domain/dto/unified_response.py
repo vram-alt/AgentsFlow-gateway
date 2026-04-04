@@ -1,8 +1,8 @@
 """
-Pydantic V2 DTO: UnifiedResponse и UsageInfo.
+Pydantic V2 DTO: UnifiedResponse and UsageInfo.
 
-Стандартизированное представление ответа от LLM-провайдера.
-Спецификация: unified_response_spec.md
+Standardized representation of an LLM provider response.
+Specification: unified_response_spec.md
 """
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator
 
 
 class UsageInfo(BaseModel):
-    """Вложенная frozen-модель статистики токенов."""
+    """Nested frozen model for token usage statistics."""
 
     model_config = ConfigDict(frozen=True)
 
@@ -24,7 +24,7 @@ class UsageInfo(BaseModel):
 
 
 class UnifiedResponse(BaseModel):
-    """Frozen DTO для стандартизированного ответа от LLM-провайдера."""
+    """Frozen DTO for a standardized LLM provider response."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -1,61 +1,61 @@
-# Спецификация: DTO UnifiedPrompt (unified_prompt.py)
+# Specification: DTO UnifiedPrompt (unified_prompt.py)
 
-> **Файл реализации:** `unified_prompt.py`  
-> **Слой:** Domain (чистое ядро, 0 внешних зависимостей кроме Pydantic)  
-> **Ответственность:** Стандартизированное представление запроса пользователя к LLM-провайдеру
-
----
-
-## 1. Общие правила
-
-- DTO — это **неизменяемая** (frozen) Pydantic-модель для передачи данных между слоями.
-- Адаптеры обязаны трансформировать вендор-специфичные форматы в этот DTO и обратно.
-- Ядро системы работает **исключительно** с этим DTO, никогда — с форматами вендоров.
-- Модель должна быть сконфигурирована как неизменяемая (frozen) через механизм конфигурации Pydantic V2.
+> **Implementation file:** `unified_prompt.py`  
+> **Layer:** Domain (pure core, zero external dependencies except Pydantic)  
+> **Responsibility:** Standardized representation of a user request to an LLM provider
 
 ---
 
-## 2. Вложенная модель: MessageItem
+## 1. General Rules
 
-| Поле      | Тип    | Обязательное | Описание                                    |
-|-----------|--------|--------------|---------------------------------------------|
-| `role`    | строка | Да           | Роль: "system", "user", "assistant"         |
-| `content` | строка | Да           | Текст сообщения                             |
+- The DTO is an **immutable** (frozen) Pydantic model for transferring data between layers.
+- Adapters are required to transform vendor-specific formats into this DTO and back.
+- The system core works **exclusively** with this DTO, never with vendor formats.
+- The model must be configured as immutable (frozen) via the Pydantic V2 configuration mechanism.
 
-### Валидация MessageItem
+---
 
-- `role`: строго одно из значений "system", "user", "assistant".
+## 2. Nested Model: MessageItem
+
+| Field     | Type   | Required | Description                                 |
+|-----------|--------|----------|---------------------------------------------|
+| `role`    | string | Yes      | Role: "system", "user", "assistant"         |
+| `content` | string | Yes      | Message text                                |
+
+### MessageItem Validation
+
+- `role`: strictly one of "system", "user", "assistant".
 
 ---
 
 ## 3. DTO: UnifiedPrompt
 
-### Назначение
+### Purpose
 
-Стандартизированное представление запроса пользователя, которое ядро передаёт в адаптер.
+Standardized representation of a user request that the core passes to the adapter.
 
-### Поля
+### Fields
 
-| Поле             | Тип                  | Обязательное | По умолчанию | Описание                                          |
-|------------------|----------------------|--------------|--------------|---------------------------------------------------|
-| `trace_id`       | строка               | Да           | —            | UUID v4 сквозного идентификатора запроса           |
-| `model`          | строка               | Да           | —            | Идентификатор модели LLM (например, "gpt-4o")     |
-| `messages`       | список MessageItem   | Да           | —            | Список сообщений диалога                          |
-| `temperature`    | число с плавающей точкой или None | Нет | None      | Температура генерации (0.0–2.0)                   |
-| `max_tokens`     | целое число или None | Нет          | None         | Максимальное количество токенов ответа             |
-| `guardrail_ids`  | список строк         | Нет          | пустой список| Список remote_id политик для применения            |
-| `metadata`       | словарь              | Нет          | пустой словарь| Произвольные метаданные (передаются провайдеру)   |
+| Field            | Type                 | Required | Default      | Description                                       |
+|------------------|----------------------|----------|--------------|---------------------------------------------------|
+| `trace_id`       | string               | Yes      | —            | UUID v4 request correlation identifier            |
+| `model`          | string               | Yes      | —            | LLM model identifier (e.g., "gpt-4o")            |
+| `messages`       | list of MessageItem  | Yes      | —            | List of conversation messages                     |
+| `temperature`    | float or None        | No       | None         | Generation temperature (0.0–2.0)                  |
+| `max_tokens`     | integer or None      | No       | None         | Maximum number of response tokens                 |
+| `guardrail_ids`  | list of strings      | No       | empty list   | List of policy remote_ids to apply                |
+| `metadata`       | dict                 | No       | empty dict   | Arbitrary metadata (passed to provider)           |
 
-### Валидация
+### Validation
 
-- `trace_id`: формат UUID v4.
-- `messages`: минимум 1 элемент в списке.
-- `temperature`: если задана — в диапазоне [0.0, 2.0].
-- `max_tokens`: если задан — положительное целое число.
+- `trace_id`: UUID v4 format.
+- `messages`: minimum 1 element in the list.
+- `temperature`: if provided — in range [0.0, 2.0].
+- `max_tokens`: if provided — positive integer.
 
 ---
 
-## 4. Обработка ошибок
+## 4. Error Handling
 
-При невалидных данных выбрасывается стандартный pydantic.ValidationError.
-Трансформация ошибок в HTTP-ответы — ответственность слоя api/.
+A standard pydantic.ValidationError is raised on invalid data.
+Transforming errors into HTTP responses is the responsibility of the api/ layer.

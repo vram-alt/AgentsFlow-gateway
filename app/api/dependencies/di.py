@@ -3,7 +3,7 @@ FastAPI dependency injection providers.
 
 Spec: app/api/dependencies/dependencies_spec.md
 
-[SRE_MARKER]: Fail-fast проверка DATABASE_URL в фабриках репозиториев.
+[SRE_MARKER]: Fail-fast DATABASE_URL validation in repository factories.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from typing import Any
 from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# Предзагрузка session.py — если модуль не загружен, patch() в тестах
-# не сможет его разрешить. Ошибки импорта подавляются (SRE: session.py
-# сам валидирует DATABASE_URL и бросает ValueError).
+# Pre-load session.py — if the module is not loaded, patch() in tests
+# cannot resolve it. Import errors are suppressed (SRE: session.py
+# validates DATABASE_URL itself and raises ValueError).
 import sys as _sys
 import types as _types
 
@@ -60,23 +60,23 @@ from app.services.provider_service import ProviderService
 from app.services.tester_service import TesterService
 from app.services.webhook_service import WebhookService
 
-# ── Синглтон адаптера (stateless, §2.4) ──────────────────────────────
+# ── Adapter singleton (stateless, §2.4) ──────────────────────────────
 _adapter_instance: PortkeyAdapter | None = None
 
-# ── Синглтон изолированного HTTP-клиента для TesterService (§4) ──────
+# ── Isolated HTTP client singleton for TesterService (§4) ──────
 _tester_http_client: httpx.AsyncClient | None = None
 
 
 def _validate_database_url() -> None:
-    """[SRE_MARKER] Fail-fast: проверяет DATABASE_URL перед созданием зависимостей.
+    """[SRE_MARKER] Fail-fast: validate DATABASE_URL before creating dependencies.
 
-    Если переменная явно задана в окружении, но пуста или не содержит схему '://',
-    выбрасывает ValueError с информативным сообщением.
-    Если переменная отсутствует в os.environ — пропускаем (pydantic-settings
-    загрузит из .env файла).
+    If the variable is explicitly set in the environment but empty or missing the '://' scheme,
+    raises ValueError with an informative message.
+    If the variable is absent from os.environ — skip (pydantic-settings
+    will load from the .env file).
     """
     if "DATABASE_URL" not in os.environ:
-        return  # не задана явно — pydantic-settings загрузит из .env
+        return  # not explicitly set — pydantic-settings will load from .env
     database_url = os.environ["DATABASE_URL"]
     if not database_url or not database_url.strip():
         raise ValueError(
@@ -91,54 +91,54 @@ def _validate_database_url() -> None:
 
 
 # ======================================================================
-# §2.1 — Фабрика: get_provider_repo
+# §2.1 — Factory: get_provider_repo
 # ======================================================================
 
 
 def get_provider_repo(
     session: AsyncSession = Depends(get_db_session),
 ) -> ProviderRepository:
-    """Создаёт ProviderRepository с переданной сессией БД.
+    """Create a ProviderRepository with the provided DB session.
 
-    [SRE_MARKER]: Валидирует DATABASE_URL перед созданием.
+    [SRE_MARKER]: Validates DATABASE_URL before creation.
     """
     _validate_database_url()
     return ProviderRepository(session=session)
 
 
 # ======================================================================
-# §2.2 — Фабрика: get_policy_repo
+# §2.2 — Factory: get_policy_repo
 # ======================================================================
 
 
 def get_policy_repo(
     session: AsyncSession = Depends(get_db_session),
 ) -> PolicyRepository:
-    """Создаёт PolicyRepository с переданной сессией БД."""
+    """Create a PolicyRepository with the provided DB session."""
     _validate_database_url()
     return PolicyRepository(session=session)
 
 
 # ======================================================================
-# §2.3 — Фабрика: get_log_repo
+# §2.3 — Factory: get_log_repo
 # ======================================================================
 
 
 def get_log_repo(session: AsyncSession = Depends(get_db_session)) -> LogRepository:
-    """Создаёт LogRepository с переданной сессией БД."""
+    """Create a LogRepository with the provided DB session."""
     _validate_database_url()
     return LogRepository(session=session)
 
 
 # ======================================================================
-# §2.4 — Фабрика: get_adapter (stateless-синглтон)
+# §2.4 — Factory: get_adapter (stateless singleton)
 # ======================================================================
 
 
 def get_adapter() -> GatewayProvider:
-    """Возвращает синглтон PortkeyAdapter.
+    """Return the PortkeyAdapter singleton.
 
-    Спека §2.4: адаптер stateless, переиспользуется.
+    Spec §2.4: adapter is stateless, reused across requests.
     """
     global _adapter_instance
     if _adapter_instance is None:
@@ -147,18 +147,18 @@ def get_adapter() -> GatewayProvider:
 
 
 # ======================================================================
-# §2.5 — Фабрика: get_log_service
+# §2.5 — Factory: get_log_service
 # ======================================================================
 
 
 def get_log_service(
     log_repo: LogRepository = Depends(get_log_repo),
 ) -> LogService:
-    """Создаёт LogService с LogRepository (из get_log_repo).
+    """Create a LogService with LogRepository (from get_log_repo).
 
-    Спека §2.5: зависимость — LogRepository (из get_log_repo).
-    При прямом вызове без аргументов (unit-тесты) — создаёт LogRepository
-    с session=None для совместимости.
+    Spec §2.5: dependency — LogRepository (from get_log_repo).
+    When called directly without arguments (unit tests) — creates LogRepository
+    with session=None for compatibility.
     """
     if not isinstance(log_repo, LogRepository):
         log_repo = LogRepository(session=None)  # type: ignore[arg-type]
@@ -166,7 +166,7 @@ def get_log_service(
 
 
 # ======================================================================
-# §2.6 — Фабрика: get_chat_service
+# §2.6 — Factory: get_chat_service
 # ======================================================================
 
 
@@ -175,10 +175,10 @@ def get_chat_service(
     log_service: LogService = Depends(get_log_service),
     adapter: GatewayProvider = Depends(get_adapter),
 ) -> ChatService:
-    """Создаёт ChatService с ProviderRepository, LogService и GatewayProvider.
+    """Create a ChatService with ProviderRepository, LogService, and GatewayProvider.
 
-    Спека §2.6: зависимости — ProviderRepository (из get_provider_repo),
-    LogService (из get_log_service), GatewayProvider (из get_adapter).
+    Spec §2.6: dependencies — ProviderRepository (from get_provider_repo),
+    LogService (from get_log_service), GatewayProvider (from get_adapter).
     """
     if not isinstance(provider_repo, ProviderRepository):
         provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
@@ -194,7 +194,7 @@ def get_chat_service(
 
 
 # ======================================================================
-# §2.7 — Фабрика: get_policy_service
+# §2.7 — Factory: get_policy_service
 # ======================================================================
 
 
@@ -204,11 +204,11 @@ def get_policy_service(
     log_service: LogService = Depends(get_log_service),
     adapter: GatewayProvider = Depends(get_adapter),
 ) -> PolicyService:
-    """Создаёт PolicyService с PolicyRepository, ProviderRepository, LogService, GatewayProvider.
+    """Create a PolicyService with PolicyRepository, ProviderRepository, LogService, GatewayProvider.
 
-    Спека §2.7: зависимости — PolicyRepository (из get_policy_repo),
-    ProviderRepository (из get_provider_repo), LogService (из get_log_service),
-    GatewayProvider (из get_adapter).
+    Spec §2.7: dependencies — PolicyRepository (from get_policy_repo),
+    ProviderRepository (from get_provider_repo), LogService (from get_log_service),
+    GatewayProvider (from get_adapter).
     """
     if not isinstance(policy_repo, PolicyRepository):
         policy_repo = PolicyRepository(session=None)  # type: ignore[arg-type]
@@ -227,7 +227,7 @@ def get_policy_service(
 
 
 # ======================================================================
-# §2.8 — Фабрика: get_webhook_service
+# §2.8 — Factory: get_webhook_service
 # ======================================================================
 
 
@@ -235,10 +235,10 @@ def get_webhook_service(
     log_service: LogService = Depends(get_log_service),
     log_repo: LogRepository = Depends(get_log_repo),
 ) -> WebhookService:
-    """Создаёт WebhookService с LogService и LogRepository.
+    """Create a WebhookService with LogService and LogRepository.
 
-    Спека §2.8: зависимости — LogService (из get_log_service),
-    LogRepository (из get_log_repo).
+    Spec §2.8: dependencies — LogService (from get_log_service),
+    LogRepository (from get_log_repo).
     """
     if not isinstance(log_repo, LogRepository):
         log_repo = LogRepository(session=None)  # type: ignore[arg-type]
@@ -248,16 +248,16 @@ def get_webhook_service(
 
 
 # ======================================================================
-# get_provider_service (дополнительная фабрика)
+# get_provider_service (additional factory)
 # ======================================================================
 
 
 def get_provider_service(
     provider_repo: ProviderRepository = Depends(get_provider_repo),
 ) -> ProviderService:
-    """Создаёт ProviderService с ProviderRepository.
+    """Create a ProviderService with ProviderRepository.
 
-    Используется для CRUD-операций над провайдерами.
+    Used for CRUD operations on providers.
     """
     if not isinstance(provider_repo, ProviderRepository):
         provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
@@ -270,9 +270,9 @@ def get_provider_service(
 
 
 def get_http_client() -> httpx.AsyncClient:
-    """Предоставляет переиспользуемый httpx.AsyncClient из адаптера.
+    """Provide the reusable httpx.AsyncClient from the adapter.
 
-    [SRE_MARKER] Если адаптер None → HTTP 503 'Service not ready'.
+    [SRE_MARKER] If adapter is None → HTTP 503 'Service not ready'.
     """
     adapter = get_adapter()
     if adapter is None:
@@ -286,10 +286,10 @@ def get_http_client() -> httpx.AsyncClient:
 
 
 def get_tester_http_client() -> httpx.AsyncClient:
-    """Предоставляет изолированный httpx.AsyncClient для TesterService.
+    """Provide an isolated httpx.AsyncClient for TesterService.
 
-    [SRE_MARKER] Изолированный пул соединений для предотвращения каскадных отказов.
-    Если адаптер None → HTTP 503 'Service not ready'.
+    [SRE_MARKER] Isolated connection pool to prevent cascading failures.
+    If adapter is None → HTTP 503 'Service not ready'.
     """
     global _tester_http_client
     adapter = get_adapter()
@@ -318,10 +318,10 @@ def get_tester_service(
     provider_repo: ProviderRepository = Depends(get_provider_repo),
     http_client: httpx.AsyncClient = Depends(get_tester_http_client),
 ) -> TesterService:
-    """Создаёт TesterService с ProviderRepository и httpx.AsyncClient.
+    """Create a TesterService with ProviderRepository and httpx.AsyncClient.
 
-    Спека upgrade §1: зависимости — ProviderRepository (из get_provider_repo),
-    httpx.AsyncClient (из get_tester_http_client).
+    Spec upgrade §1: dependencies — ProviderRepository (from get_provider_repo),
+    httpx.AsyncClient (from get_tester_http_client).
     """
     if not isinstance(provider_repo, ProviderRepository):
         provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]

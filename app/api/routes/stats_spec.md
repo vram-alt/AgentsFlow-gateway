@@ -1,114 +1,114 @@
-# Спецификация: app/api/routes/stats.py
+# Specification: app/api/routes/stats.py
 
-## Назначение
+## Purpose
 
-Роутер модуля «Dashboard» — предоставляет агрегированную статистику и данные для графиков на основе таблицы `logs`. Реализует файл `app/api/routes/stats.py`.
-
----
-
-## §1. Общие сведения
-
-- **Префикс**: `/api/stats`
-- **Теги OpenAPI**: `["Stats"]`
-- **Аутентификация**: все эндпоинты защищены зависимостью `get_current_user` (HTTP Basic Auth).
-- **Зависимости**: `LogService` (через DI-фабрику `get_log_service`).
+Router for the "Dashboard" module — provides aggregated statistics and chart data based on the `logs` table. Implements the file `app/api/routes/stats.py`.
 
 ---
 
-## §2. Эндпоинт: GET /api/stats/summary
+## §1. General Information
 
-### §2.1 Назначение
-
-Возвращает сводную статистику для главного дашборда: общее количество событий, количество чат-запросов, инцидентов guardrail, системных ошибок, суммарное количество токенов и среднюю задержку (latency).
-
-### §2.2 Параметры запроса
-
-Параметры отсутствуют (кроме аутентификации).
-
-### §2.3 Кэширование результата (Performance)
-
-Эндпоинт вызывает тяжёлую агрегацию (`aggregate_token_stats()`), которая загружает записи из таблицы `logs` для парсинга JSON. Для предотвращения DoS и OOM при росте таблицы:
-- Результат `get_stats_summary()` ДОЛЖЕН кэшироваться в in-memory кэше с TTL = 60 секунд.
-- Кэш хранится как модульная переменная (словарь с ключами `result` и `timestamp`).
-- Повторный вызов в пределах TTL возвращает кэшированный результат без обращения к БД.
-- Кэш сбрасывается автоматически по истечении TTL.
-
-### §2.4 Защита от параллельных запросов (Availability)
-
-Тяжёлый агрегационный запрос НЕ должен выполняться параллельно несколькими запросами одновременно. Для предотвращения исчерпания пула соединений БД:
-- Использовать асинхронную блокировку (lock) на уровне эндпоинта или сервиса.
-- Если блокировка уже захвачена другим запросом — ожидать её освобождения (не отклонять запрос).
-- Это гарантирует, что в любой момент времени выполняется не более одного агрегационного запроса к БД.
-
-### §2.5 Алгоритм обработки
-
-1. Проверить in-memory кэш. Если кэш валиден (возраст < 60 секунд) — вернуть кэшированный результат.
-2. Захватить асинхронную блокировку (см. §2.4).
-3. Повторно проверить кэш (double-check после захвата блокировки — другой запрос мог обновить кэш пока мы ждали).
-4. Вызвать метод `log_service.get_stats_summary()`.
-5. Метод сервиса возвращает словарь с ключами:
-   - `total` — целое число, общее количество записей в таблице logs.
-   - `chat_requests` — целое число, количество записей с event_type равным "chat_request".
-   - `guardrail_incidents` — целое число, количество записей с event_type равным "guardrail_incident".
-   - `system_errors` — целое число, количество записей с event_type равным "system_error".
-   - `total_tokens` — целое число, сумма всех токенов, извлечённых из JSON-поля payload каждой записи (путь: `response.usage.total_tokens`). Если поле отсутствует или не является числом — запись пропускается (вклад = 0).
-   - `avg_latency_ms` — число с плавающей точкой (округлённое до 2 знаков), средняя задержка в миллисекундах. Вычисляется из JSON-поля payload каждой записи (путь: `response.latency_ms`). Если поле отсутствует — запись не участвует в расчёте среднего. Если ни одна запись не содержит latency — возвращать 0.0.
-6. Сохранить результат в кэш с текущей временной меткой.
-7. Освободить блокировку.
-8. Вернуть результат как JSON-ответ со статусом 200.
-
-### §2.6 Формат ответа (HTTP 200)
-
-Словарь с шестью ключами: `total`, `chat_requests`, `guardrail_incidents`, `system_errors`, `total_tokens`, `avg_latency_ms`. Все значения — числа.
-
-### §2.7 Обработка ошибок
-
-- При любом исключении из сервисного слоя — вернуть HTTP 500 с телом, содержащим ключ `detail` и строковое значение "Internal server error".
-- trace_id в ответе об ошибке обязателен: генерировать UUID v4.
+- **Prefix**: `/api/stats`
+- **OpenAPI Tags**: `["Stats"]`
+- **Authentication**: all endpoints are protected by the `get_current_user` dependency (HTTP Basic Auth).
+- **Dependencies**: `LogService` (via DI factory `get_log_service`).
 
 ---
 
-## §3. Эндпоинт: GET /api/stats/charts
+## §2. Endpoint: GET /api/stats/summary
 
-### §3.1 Назначение
+### §2.1 Purpose
 
-Возвращает данные для построения графика активности — количество событий, сгруппированных по часам за последние 24 часа.
+Returns summary statistics for the main dashboard: total event count, chat request count, guardrail incident count, system error count, total token count, and average latency.
 
-### §3.2 Параметры запроса
+### §2.2 Request Parameters
 
-| Параметр | Тип | Обязательный | По умолчанию | Описание |
+No parameters (besides authentication).
+
+### §2.3 Result Caching (Performance)
+
+The endpoint calls a heavy aggregation (`aggregate_token_stats()`), which loads records from the `logs` table for JSON parsing. To prevent DoS and OOM as the table grows:
+- The `get_stats_summary()` result MUST be cached in an in-memory cache with TTL = 60 seconds.
+- The cache is stored as a module variable (dict with `result` and `timestamp` keys).
+- Repeated calls within the TTL return the cached result without DB access.
+- The cache is automatically invalidated upon TTL expiration.
+
+### §2.4 Parallel Request Protection (Availability)
+
+The heavy aggregation query MUST NOT be executed in parallel by multiple simultaneous requests. To prevent DB connection pool exhaustion:
+- Use an async lock at the endpoint or service level.
+- If the lock is already held by another request — wait for its release (do not reject the request).
+- This guarantees that at most one aggregation query is executing against the DB at any given time.
+
+### §2.5 Processing Algorithm
+
+1. Check the in-memory cache. If the cache is valid (age < 60 seconds) — return the cached result.
+2. Acquire the async lock (see §2.4).
+3. Re-check the cache (double-check after lock acquisition — another request may have updated the cache while we were waiting).
+4. Call the `log_service.get_stats_summary()` method.
+5. The service method returns a dict with keys:
+   - `total` — integer, total record count in the logs table.
+   - `chat_requests` — integer, record count with event_type equal to "chat_request".
+   - `guardrail_incidents` — integer, record count with event_type equal to "guardrail_incident".
+   - `system_errors` — integer, record count with event_type equal to "system_error".
+   - `total_tokens` — integer, sum of all tokens extracted from the JSON payload field of each record (path: `response.usage.total_tokens`). If the field is absent or not a number — the record is skipped (contribution = 0).
+   - `avg_latency_ms` — float (rounded to 2 decimal places), average latency in milliseconds. Computed from the JSON payload field of each record (path: `response.latency_ms`). If the field is absent — the record does not participate in the average calculation. If no records contain latency — return 0.0.
+6. Save the result to cache with the current timestamp.
+7. Release the lock.
+8. Return the result as a JSON response with status 200.
+
+### §2.6 Response Format (HTTP 200)
+
+Dict with six keys: `total`, `chat_requests`, `guardrail_incidents`, `system_errors`, `total_tokens`, `avg_latency_ms`. All values are numbers.
+
+### §2.7 Error Handling
+
+- On any exception from the service layer — return HTTP 500 with body containing key `detail` and string value "Internal server error".
+- trace_id in the error response is mandatory: generate UUID v4.
+
+---
+
+## §3. Endpoint: GET /api/stats/charts
+
+### §3.1 Purpose
+
+Returns data for building an activity chart — event counts grouped by hour for the last 24 hours.
+
+### §3.2 Request Parameters
+
+| Parameter | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `hours` | int | Нет | 24 | Количество часов назад от текущего момента. Допустимый диапазон: от 1 до 168 (7 дней). Валидация: значение ДОЛЖНО быть >= 1 и <= 168. Валидация выполняется на уровне FastAPI Query с параметрами ge=1, le=168. |
+| `hours` | int | No | 24 | Number of hours back from the current moment. Allowed range: 1 to 168 (7 days). Validation: value MUST be >= 1 and <= 168. Validation is performed at the FastAPI Query level with parameters ge=1, le=168. |
 
-### §3.3 Требование к индексу
+### §3.3 Index Requirement
 
-SQL-запрос фильтрует по `created_at >= since` и группирует по форматированной дате. Для предотвращения full table scan колонка `logs.created_at` ДОЛЖНА иметь индекс (см. спецификацию `repositories_upgrade_spec.md` §2.5).
+The SQL query filters by `created_at >= since` and groups by formatted date. To prevent full table scans, the `logs.created_at` column MUST have an index (see `repositories_upgrade_spec.md` §2.5).
 
-### §3.4 Алгоритм обработки
+### §3.4 Processing Algorithm
 
-1. Вызвать метод `log_service.get_chart_data(hours=hours)`.
-2. Метод сервиса возвращает список словарей, каждый из которых содержит:
-   - `hour` — строка в формате "YYYY-MM-DD HH:00" (начало часового интервала).
-   - `count` — целое число, количество записей в этом часовом интервале.
-3. Список отсортирован по `hour` в порядке возрастания (от старых к новым).
-4. Если в каком-то часовом интервале нет записей — этот интервал НЕ включается в результат (sparse-формат). Заполнение пропусков нулями — ответственность фронтенда.
-5. Вернуть результат как JSON-массив со статусом 200.
+1. Call the `log_service.get_chart_data(hours=hours)` method.
+2. The service method returns a list of dicts, each containing:
+   - `hour` — string in "YYYY-MM-DD HH:00" format (start of the hourly interval).
+   - `count` — integer, record count in that hourly interval.
+3. The list is sorted by `hour` in ascending order (oldest to newest).
+4. If a particular hourly interval has no records — that interval is NOT included in the result (sparse format). Filling gaps with zeros is the frontend's responsibility.
+5. Return the result as a JSON array with status 200.
 
-### §3.5 Формат ответа (HTTP 200)
+### §3.5 Response Format (HTTP 200)
 
-JSON-массив словарей с ключами `hour` (строка) и `count` (целое число).
+JSON array of dicts with keys `hour` (string) and `count` (integer).
 
-### §3.6 Обработка ошибок
+### §3.6 Error Handling
 
-- При любом исключении из сервисного слоя — вернуть HTTP 500 с телом, содержащим ключ `detail` и строковое значение "Internal server error".
-- trace_id в ответе об ошибке обязателен: генерировать UUID v4.
+- On any exception from the service layer — return HTTP 500 with body containing key `detail` and string value "Internal server error".
+- trace_id in the error response is mandatory: generate UUID v4.
 
 ---
 
-## §4. Безопасность
+## §4. Security
 
-- Все эндпоинты требуют HTTP Basic Auth через зависимость `get_current_user`.
-- Используется timing-safe сравнение (реализовано в middleware).
-- Rate limiting применяется на уровне middleware (5 неудачных попыток за 60 секунд → HTTP 429).
-- Эндпоинт `/api/stats/summary` защищён кэшированием (TTL=60s) и асинхронной блокировкой для предотвращения DoS через параллельные тяжёлые запросы (см. §2.3, §2.4).
-- Параметр `hours` валидируется на уровне FastAPI Query (ge=1, le=168) для предотвращения чрезмерно широких запросов.
+- All endpoints require HTTP Basic Auth via the `get_current_user` dependency.
+- Timing-safe comparison is used (implemented in middleware).
+- Rate limiting is applied at the middleware level (5 failed attempts in 60 seconds → HTTP 429).
+- The `/api/stats/summary` endpoint is protected by caching (TTL=60s) and an async lock to prevent DoS via parallel heavy queries (see §2.3, §2.4).
+- The `hours` parameter is validated at the FastAPI Query level (ge=1, le=168) to prevent excessively broad queries.

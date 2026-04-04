@@ -1,5 +1,5 @@
 """
-Router: POST /api/chat/send — отправка промпта к LLM через шлюз (Режим А).
+Router: POST /api/chat/send — send a prompt to the LLM via the gateway (Mode A).
 
 Spec: app/api/routes/chat_spec.md
 [SRE_MARKER] trace_id MUST always be present in both success and error responses.
@@ -26,7 +26,7 @@ async def send_chat(
     chat_service: ChatService = Depends(get_chat_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Отправка промпта к LLM через шлюз."""
+    """Send a prompt to the LLM via the gateway."""
 
     result = await chat_service.send_chat_message(
         model=body.model,
@@ -50,11 +50,18 @@ async def send_chat(
         )
 
     # result is UnifiedResponse (or mock with same attrs)
+    # Convert usage to dict to avoid cross-module Pydantic model mismatch
+    # (unified_response.UsageInfo vs chat.UsageInfo)
+    usage_raw = result.usage
+    if usage_raw is not None and hasattr(usage_raw, "model_dump"):
+        usage_data = usage_raw.model_dump()
+    else:
+        usage_data = usage_raw  # already a dict or None
     chat_response = ChatResponse(
         trace_id=result.trace_id,
         content=result.content,
         model=result.model,
-        usage=result.usage,
+        usage=usage_data,
         guardrail_blocked=result.guardrail_blocked,
     )
     return JSONResponse(status_code=200, content=chat_response.model_dump())

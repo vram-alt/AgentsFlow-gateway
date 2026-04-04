@@ -1,6 +1,6 @@
-"""Pydantic V2 схемы для эндпоинтов модуля Testing Console.
+"""Pydantic V2 schemas for Testing Console module endpoints.
 
-Спецификация: app/api/schemas/tester_spec.md
+Specification: app/api/schemas/tester_spec.md
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 
 
 class TesterProxyRequest(BaseModel):
-    """Тело запроса для POST /api/tester/proxy (§1)."""
+    """Request body for POST /api/tester/proxy (§1)."""
 
     provider_name: str = Field(..., min_length=1)
     method: str = "POST"
@@ -24,7 +24,7 @@ class TesterProxyRequest(BaseModel):
     @field_validator("method")
     @classmethod
     def _validate_method(cls, v: str) -> str:
-        """Допустимые методы: GET, POST, PUT, DELETE. Приводить к верхнему регистру."""
+        """Allowed methods: GET, POST, PUT, DELETE. Normalize to uppercase."""
         upper = v.upper()
         if upper not in ("GET", "POST", "PUT", "DELETE"):
             raise ValueError(
@@ -35,9 +35,9 @@ class TesterProxyRequest(BaseModel):
     @field_validator("path")
     @classmethod
     def _validate_path(cls, v: str) -> str:
-        """[SRE_MARKER] Валидация path: SSRF, path traversal, абсолютные URL (§1.1)."""
+        """[SRE_MARKER] Path validation: SSRF, path traversal, absolute URLs (§1.1)."""
         decoded = unquote(v)
-        # Двойное декодирование для защиты от %252e%252e
+        # Double decoding to protect against %252e%252e
         decoded = unquote(decoded)
         if "://" in decoded:
             raise ValueError("Absolute URLs are not allowed in path")
@@ -47,7 +47,7 @@ class TesterProxyRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_body_size(self) -> TesterProxyRequest:
-        """[SRE_MARKER] Ограничение размера body (§1.2)."""
+        """[SRE_MARKER] Body size limit (§1.2)."""
         if self.body is not None:
             serialized = json.dumps(self.body)
             if len(serialized.encode("utf-8")) > 1_048_576:
@@ -56,7 +56,7 @@ class TesterProxyRequest(BaseModel):
 
     @model_validator(mode="after")
     def _validate_headers_limits(self) -> TesterProxyRequest:
-        """[SRE_MARKER] Ограничение количества и длины headers (§1.3)."""
+        """[SRE_MARKER] Header count and length limits (§1.3)."""
         if self.headers is not None:
             if len(self.headers) > 20:
                 raise ValueError("Too many headers (max 20)")
@@ -69,7 +69,7 @@ class TesterProxyRequest(BaseModel):
 
 
 class TesterProxyResponse(BaseModel):
-    """Ответ для POST /api/tester/proxy — успех (§2)."""
+    """Response for POST /api/tester/proxy — success (§2)."""
 
     status_code: int
     headers: dict[str, str]
@@ -78,7 +78,7 @@ class TesterProxyResponse(BaseModel):
 
 
 class TesterErrorResponse(BaseModel):
-    """Ответ об ошибке для эндпоинтов тестера (§3)."""
+    """Error response for tester endpoints (§3)."""
 
     trace_id: str
     error_code: str

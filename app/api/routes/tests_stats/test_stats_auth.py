@@ -2,7 +2,7 @@
 Тесты аутентификации и trace_id в ответах об ошибках для Stats.
 
 Извлечены из app/api/routes/test_stats.py при рефакторинге.
-Спецификация: app/api/routes/stats_spec.md
+Specification: app/api/routes/stats_spec.md
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 """
-Модульные тесты для PortkeyAdapter (TDD Red phase).
-Спецификация: portkey_adapter_spec.md
+Unit tests for PortkeyAdapter (TDD Red phase).
+Specification: portkey_adapter_spec.md
 """
 
 from __future__ import annotations
@@ -589,7 +589,7 @@ class TestErrorMapping:
     async def test_json_decode_error_maps_to_provider_error(self):
         """json.JSONDecodeError -> PROVIDER_ERROR, status 502."""
         a = PortkeyAdapter()
-        # Возвращаем ответ с невалидным JSON
+        # Return a response with invalid JSON
         bad_resp = httpx.Response(
             200, content=b"not-json", request=httpx.Request("POST", BASE_URL)
         )
@@ -630,7 +630,7 @@ class TestErrorMapping:
             c.request = req
             g.return_value = c
             r = await a.send_prompt(_prompt(), API_KEY, BASE_URL)
-        # Не должно быть исключения — результат GatewayError
+        # Should not be an exception — result is GatewayError
         assert isinstance(r, GatewayError)
 
     @pytest.mark.asyncio
@@ -723,7 +723,7 @@ class TestLifecycle:
     async def test_close_is_idempotent(self):
         """Повторный вызов close() не должен вызывать ошибку."""
         a = PortkeyAdapter()
-        # Без инициализированного клиента close() не должен падать
+        # Without an initialized client, close() should not fail
         await a.close()
         await a.close()
 

@@ -1,9 +1,9 @@
 """
-Модульные тесты для LogService.
-Спецификация: app/services/log_service_spec.md
+Unit tests for LogService.
+Specification: app/services/log_service_spec.md
 
-TDD Red-фаза: все тесты должны падать с ImportError,
-пока LogService не реализован.
+TDD Red phase: all tests should fail with ImportError,
+until LogService is not implemented.
 """
 
 import logging
@@ -12,21 +12,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-# ── Импорт тестируемого класса (должен упасть на Red-фазе) ──────────────
+# ── Import tested class (should fail during Red phase) ──────────────
 from app.services.log_service import LogService
 
-# ── Импорт доменных объектов (уже реализованы в скаффолдинге) ────────────
+# ── Импорт доменных объектов (already implemented in scaffolding) ────────────
 from app.domain.entities.log_entry import EventType, LogEntry
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Фикстуры
+# Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 @pytest.fixture
 def mock_log_repo():
-    """Мок LogRepository с async-методами."""
+    """Mock LogRepository with async methods."""
     repo = AsyncMock()
     repo.create = AsyncMock(return_value=None)
     repo.list_all = AsyncMock(return_value=[])
@@ -39,13 +39,13 @@ def mock_log_repo():
 
 @pytest.fixture
 def service(mock_log_repo):
-    """Экземпляр LogService с замоканным репозиторием."""
+    """Instance of LogService с замоканным репозиторием."""
     return LogService(log_repo=mock_log_repo)
 
 
 @pytest.fixture
 def valid_trace_id():
-    """Валидный UUID v4 trace_id."""
+    """Valid UUID v4 trace_id."""
     return "123e4567-e89b-42d3-a456-426614174000"
 
 
@@ -81,31 +81,31 @@ def sample_error_data():
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Конструктор (спецификация §2)
+# Constructor (specification §2)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestLogServiceConstructor:
-    """Тесты конструктора LogService (спецификация §2)."""
+    """Constructor tests for LogService (specification §2)."""
 
     def test_constructor_accepts_log_repo(self, mock_log_repo):
-        """LogService принимает log_repo через конструктор."""
+        """LogService accepts log_repo via constructor."""
         svc = LogService(log_repo=mock_log_repo)
         assert svc is not None
 
     def test_constructor_stores_log_repo(self, mock_log_repo):
-        """Зависимость log_repo сохраняется как атрибут экземпляра."""
+        """Dependency log_repo is stored as an instance attribute."""
         svc = LogService(log_repo=mock_log_repo)
         assert svc.log_repo is mock_log_repo
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 3. log_chat_request (спецификация §3)
+# 3. log_chat_request (specification §3)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestLogChatRequest:
-    """Тесты для метода log_chat_request (спецификация §3)."""
+    """Tests for метода log_chat_request (specification §3)."""
 
     @pytest.mark.asyncio
     async def test_log_chat_request_calls_repo_create(
@@ -177,7 +177,7 @@ class TestLogChatRequest:
         sample_prompt_data,
         sample_response_data,
     ):
-        """По умолчанию is_error=False в payload."""
+        """By default is_error=False в payload."""
         await service.log_chat_request(
             trace_id=valid_trace_id,
             prompt_data=sample_prompt_data,
@@ -217,7 +217,7 @@ class TestLogChatRequest:
         sample_prompt_data,
         sample_response_data,
     ):
-        """Payload содержит 'logged_at' в формате ISO 8601 UTC."""
+        """Payload содержит 'logged_at' in ISO 8601 UTC format."""
         await service.log_chat_request(
             trace_id=valid_trace_id,
             prompt_data=sample_prompt_data,
@@ -238,7 +238,7 @@ class TestLogChatRequest:
         sample_prompt_data,
         sample_response_data,
     ):
-        """Payload содержит ровно 4 ключа: prompt, response, is_error, logged_at."""
+        """Payload contains exactly 4 ключа: prompt, response, is_error, logged_at."""
         await service.log_chat_request(
             trace_id=valid_trace_id,
             prompt_data=sample_prompt_data,
@@ -252,7 +252,7 @@ class TestLogChatRequest:
     async def test_log_chat_request_returns_none(
         self, service, valid_trace_id, sample_prompt_data, sample_response_data
     ):
-        """Метод возвращает None."""
+        """Method returns None."""
         result = await service.log_chat_request(
             trace_id=valid_trace_id,
             prompt_data=sample_prompt_data,
@@ -320,12 +320,12 @@ class TestLogChatRequest:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 4. log_guardrail_incident (спецификация §4)
+# 4. log_guardrail_incident (specification §4)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestLogGuardrailIncident:
-    """Тесты для метода log_guardrail_incident (спецификация §4)."""
+    """Tests for метода log_guardrail_incident (specification §4)."""
 
     @pytest.mark.asyncio
     async def test_log_guardrail_incident_calls_repo_create(
@@ -385,7 +385,7 @@ class TestLogGuardrailIncident:
     async def test_log_guardrail_incident_payload_has_exactly_two_keys(
         self, service, mock_log_repo, valid_trace_id, sample_incident_data
     ):
-        """Payload содержит ровно 2 ключа: incident и logged_at."""
+        """Payload contains exactly 2 ключа: incident и logged_at."""
         await service.log_guardrail_incident(
             trace_id=valid_trace_id,
             incident_data=sample_incident_data,
@@ -398,7 +398,7 @@ class TestLogGuardrailIncident:
     async def test_log_guardrail_incident_returns_none(
         self, service, valid_trace_id, sample_incident_data
     ):
-        """Метод возвращает None."""
+        """Method returns None."""
         result = await service.log_guardrail_incident(
             trace_id=valid_trace_id,
             incident_data=sample_incident_data,
@@ -422,7 +422,7 @@ class TestLogGuardrailIncident:
     async def test_log_guardrail_incident_logs_stderr_on_error(
         self, service, mock_log_repo, valid_trace_id, sample_incident_data
     ):
-        """[SRE_MARKER] При ошибке — logging.error вызывается."""
+        """[SRE_MARKER] При ошибке — logging.error is called."""
         mock_log_repo.create.side_effect = RuntimeError("DB timeout")
 
         with patch("app.services.log_service.logging") as mock_logging:
@@ -434,12 +434,12 @@ class TestLogGuardrailIncident:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 5. log_system_error (спецификация §5)
+# 5. log_system_error (specification §5)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestLogSystemError:
-    """Тесты для метода log_system_error (спецификация §5)."""
+    """Tests for метода log_system_error (specification §5)."""
 
     @pytest.mark.asyncio
     async def test_log_system_error_calls_repo_create(
@@ -499,7 +499,7 @@ class TestLogSystemError:
     async def test_log_system_error_payload_has_exactly_two_keys(
         self, service, mock_log_repo, valid_trace_id, sample_error_data
     ):
-        """Payload содержит ровно 2 ключа: error и logged_at."""
+        """Payload contains exactly 2 ключа: error и logged_at."""
         await service.log_system_error(
             trace_id=valid_trace_id,
             error_data=sample_error_data,
@@ -512,7 +512,7 @@ class TestLogSystemError:
     async def test_log_system_error_returns_none(
         self, service, valid_trace_id, sample_error_data
     ):
-        """Метод возвращает None."""
+        """Method returns None."""
         result = await service.log_system_error(
             trace_id=valid_trace_id,
             error_data=sample_error_data,
@@ -536,7 +536,7 @@ class TestLogSystemError:
     async def test_log_system_error_logs_stderr_on_error(
         self, service, mock_log_repo, valid_trace_id, sample_error_data
     ):
-        """[SRE_MARKER] При ошибке — logging.error вызывается."""
+        """[SRE_MARKER] При ошибке — logging.error is called."""
         mock_log_repo.create.side_effect = Exception("Disk full")
 
         with patch("app.services.log_service.logging") as mock_logging:
@@ -548,16 +548,16 @@ class TestLogSystemError:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 6. get_logs (спецификация §6)
+# 6. get_logs (specification §6)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestGetLogs:
-    """Тесты для метода get_logs (спецификация §6)."""
+    """Tests for метода get_logs (specification §6)."""
 
     @pytest.mark.asyncio
     async def test_get_logs_default_params(self, service, mock_log_repo):
-        """По умолчанию limit=100, offset=0, event_type=None -> list_all."""
+        """By default limit=100, offset=0, event_type=None -> list_all."""
         mock_log_repo.list_all.return_value = []
 
         await service.get_logs()
@@ -577,7 +577,7 @@ class TestGetLogs:
     async def test_get_logs_with_event_type_calls_list_by_type(
         self, service, mock_log_repo
     ):
-        """Если event_type задан -> вызывается list_by_type."""
+        """If event_type задан -> вызывается list_by_type."""
         mock_log_repo.list_by_type.return_value = []
 
         await service.get_logs(event_type="chat_request")
@@ -599,7 +599,7 @@ class TestGetLogs:
 
     @pytest.mark.asyncio
     async def test_get_logs_returns_list(self, service, mock_log_repo):
-        """Метод возвращает список."""
+        """Method returns список."""
         fake_orm = MagicMock(
             id=1,
             trace_id="123e4567-e89b-42d3-a456-426614174000",
@@ -649,18 +649,18 @@ class TestGetLogs:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 7. get_logs_by_trace_id (спецификация §7)
+# 7. get_logs_by_trace_id (specification §7)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestGetLogsByTraceId:
-    """Тесты для метода get_logs_by_trace_id (спецификация §7)."""
+    """Tests for метода get_logs_by_trace_id (specification §7)."""
 
     @pytest.mark.asyncio
     async def test_get_logs_by_trace_id_calls_repo(
         self, service, mock_log_repo, valid_trace_id
     ):
-        """Вызывает log_repo.get_by_trace_id с переданным trace_id."""
+        """Calls log_repo.get_by_trace_id с переданным trace_id."""
         mock_log_repo.get_by_trace_id.return_value = []
 
         await service.get_logs_by_trace_id(trace_id=valid_trace_id)
@@ -671,7 +671,7 @@ class TestGetLogsByTraceId:
     async def test_get_logs_by_trace_id_returns_list(
         self, service, mock_log_repo, valid_trace_id
     ):
-        """Метод возвращает список."""
+        """Method returns список."""
         fake_orm = MagicMock(
             id=1,
             trace_id=valid_trace_id,
@@ -744,16 +744,16 @@ class TestGetLogsByTraceId:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 8. get_log_stats (спецификация §8)
+# 8. get_log_stats (specification §8)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestGetLogStats:
-    """Тесты для метода get_log_stats (спецификация §8)."""
+    """Tests for метода get_log_stats (specification §8)."""
 
     @pytest.mark.asyncio
     async def test_get_log_stats_returns_dict(self, service, mock_log_repo):
-        """Метод возвращает словарь."""
+        """Method returns словарь."""
         mock_log_repo.count_all.return_value = 10
         mock_log_repo.count_by_type.return_value = 3
 
@@ -848,12 +848,12 @@ class TestGetLogStats:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# 9. Обработка ошибок — общие сценарии (спецификация §9)
+# 9. Обработка ошибок — общие сценарии (specification §9)
 # ═══════════════════════════════════════════════════════════════════════════
 
 
 class TestErrorHandlingGeneral:
-    """Общие тесты обработки ошибок (спецификация §9)."""
+    """Общие тесты обработки ошибок (specification §9)."""
 
     @pytest.mark.asyncio
     async def test_write_error_suppressed_in_log_chat_request(
@@ -917,11 +917,11 @@ class TestErrorHandlingGeneral:
 
 
 class TestGetStatsSummary:
-    """Тесты для нового метода get_stats_summary (upgrade spec §1)."""
+    """Tests for нового метода get_stats_summary (upgrade spec §1)."""
 
     @pytest.mark.asyncio
     async def test_get_stats_summary_returns_dict(self, service, mock_log_repo):
-        """Метод возвращает словарь."""
+        """Method returns словарь."""
         mock_log_repo.count_all.return_value = 100
         mock_log_repo.count_by_type.return_value = 30
         mock_log_repo.aggregate_token_stats = AsyncMock(
@@ -1006,11 +1006,11 @@ class TestGetStatsSummary:
 
 
 class TestGetChartData:
-    """Тесты для нового метода get_chart_data (upgrade spec §2)."""
+    """Tests for нового метода get_chart_data (upgrade spec §2)."""
 
     @pytest.mark.asyncio
     async def test_get_chart_data_returns_list(self, service, mock_log_repo):
-        """Метод возвращает список словарей."""
+        """Method returns список словарей."""
         mock_log_repo.count_by_hour = AsyncMock(
             return_value=[("2026-04-01 10:00", 5), ("2026-04-01 11:00", 12)]
         )
@@ -1036,7 +1036,7 @@ class TestGetChartData:
 
     @pytest.mark.asyncio
     async def test_get_chart_data_default_hours_24(self, service, mock_log_repo):
-        """По умолчанию hours=24."""
+        """By default hours=24."""
         mock_log_repo.count_by_hour = AsyncMock(return_value=[])
 
         await service.get_chart_data()
@@ -1072,11 +1072,11 @@ class TestGetChartData:
 
 
 class TestGetLogById:
-    """Тесты для нового метода get_log_by_id (upgrade spec §3)."""
+    """Tests for нового метода get_log_by_id (upgrade spec §3)."""
 
     @pytest.mark.asyncio
     async def test_get_log_by_id_calls_repo(self, service, mock_log_repo):
-        """Вызывает log_repo.get_by_id с переданным log_id."""
+        """Calls log_repo.get_by_id с переданным log_id."""
         mock_log_repo.get_by_id = AsyncMock(return_value=None)
 
         await service.get_log_by_id(log_id=42)
@@ -1109,7 +1109,7 @@ class TestGetLogById:
 
 
 class TestExportLogs:
-    """Тесты для нового метода export_logs (upgrade spec §4)."""
+    """Tests for нового метода export_logs (upgrade spec §4)."""
 
     @pytest.mark.asyncio
     async def test_export_logs_yields_csv_header(self, service, mock_log_repo):

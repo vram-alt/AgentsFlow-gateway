@@ -2,7 +2,7 @@
 Тесты для GET /api/providers/health и SSRF-защиты.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md (upgrade §1)
+Specification: app/api/routes/providers_spec.md (upgrade §1)
 """
 
 import pytest
@@ -21,7 +21,7 @@ from app.api.middleware.auth import get_current_user
 
 
 class TestGetProvidersHealth:
-    """Тесты для нового эндпоинта GET /api/providers/health (upgrade spec §1)."""
+    """Tests for нового эндпоинта GET /api/providers/health (upgrade spec §1)."""
 
     @pytest.fixture()
     def health_client(self, mock_provider_service: MagicMock) -> TestClient:
@@ -226,7 +226,7 @@ class TestProviderServiceSSRF:
 
     @pytest.mark.asyncio
     async def test_check_health_accepts_http_client(self, provider_service_instance):
-        """check_health принимает http_client как аргумент (не через конструктор).
+        """check_health accepts http_client как аргумент (не через конструктор).
 
         provider_service_upgrade_spec.md §1.2: не менять сигнатуру конструктора.
         """

@@ -1,126 +1,126 @@
-# Спецификация: Роутер провайдеров (providers.py)
+# Specification: Providers Router (providers.py)
 
-> **Файл реализации:** `providers.py`  
-> **Слой:** API / Delivery  
-> **Ответственность:** HTTP-обработчики для CRUD-операций над провайдерами LLM и проверки их доступности
-
----
-
-## 1. Общие правила
-
-- Роуты — тонкие обёртки: принимают HTTP-запрос, вызывают сервис, возвращают HTTP-ответ.
-- Бизнес-логика **запрещена** в роутах — только маршрутизация и трансформация.
-- Все зависимости получаются через FastAPI Depends.
-- Pydantic-схемы для request/response определяются в этом файле.
+> **Implementation file:** `providers.py`  
+> **Layer:** API / Delivery  
+> **Responsibility:** HTTP handlers for CRUD operations on LLM providers and health checks
 
 ---
 
-## 2. Роутер
+## 1. General Rules
 
-**Префикс:** `/api/providers`  
-**Теги:** "Providers"  
-**Защита:** HTTP Basic Auth.
-
-**Важно: порядок регистрации.** Эндпоинт `/api/providers/health` ДОЛЖЕН быть зарегистрирован ПЕРЕД эндпоинтом `/api/providers/{provider_id}`, иначе FastAPI интерпретирует "health" как значение параметра `provider_id`. Разместить декоратор маршрута выше в файле, чем существующие параметризованные маршруты.
-
----
-
-## 3. Эндпоинт: GET /api/providers/
-
-### Назначение
-
-Список всех провайдеров.
+- Routes are thin wrappers: accept an HTTP request, call the service, return an HTTP response.
+- Business logic is **prohibited** in routes — only routing and transformation.
+- All dependencies are obtained via FastAPI Depends.
+- Pydantic schemas for request/response are defined in this file.
 
 ---
 
-## 4. Эндпоинт: POST /api/providers/
+## 2. Router
 
-### Назначение
+**Prefix:** `/api/providers`  
+**Tags:** "Providers"  
+**Protection:** HTTP Basic Auth.
 
-Создание нового провайдера.
-
-### Request Body (схема ProviderCreateRequest)
-
-| Поле       | Тип    | Обязательное | Описание                    |
-|------------|--------|--------------|-----------------------------|
-| `name`     | строка | Да           | Название провайдера          |
-| `api_key`  | строка | Да           | API-ключ для аутентификации  |
-| `base_url` | строка | Да           | Базовый URL API провайдера   |
+**Important: registration order.** The `/api/providers/health` endpoint MUST be registered BEFORE the `/api/providers/{provider_id}` endpoint, otherwise FastAPI interprets "health" as a value for the `provider_id` parameter. Place the route decorator above the existing parameterized routes in the file.
 
 ---
 
-## 5. Эндпоинт: GET /api/providers/health
+## 3. Endpoint: GET /api/providers/
 
-### Назначение
+### Purpose
 
-Возвращает статус доступности всех активных LLM-провайдеров. Используется дашбордом для отображения «светофора» состояния провайдеров.
-
-### Параметры запроса
-
-Параметры отсутствуют (кроме аутентификации).
-
-### Зависимости
-
-- `ProviderService` — через существующую DI-фабрику `get_provider_service`.
-- `httpx.AsyncClient` — через DI-фабрику `get_http_client`.
-
-### Алгоритм обработки
-
-1. Получить `provider_service` и `http_client` через DI.
-2. **Кэширование**: перед вызовом сервиса проверить in-memory кэш результата health-check. Кэш хранится как модульная переменная (словарь с ключами `result` и `timestamp`). Если кэш существует и его возраст менее 30 секунд (TTL=30s) — вернуть кэшированный результат без выполнения сетевых запросов. Это предотвращает каскадный отказ при частом polling дашбордом: если провайдеры медленно отвечают, накопление незавершённых запросов не исчерпает пул соединений httpx.
-3. Если кэш отсутствует или устарел — вызвать `provider_service.check_health(http_client)`.
-4. Сохранить результат в кэш с текущей временной меткой.
-5. Вернуть результат как JSON-массив со статусом 200.
-
-### Формат ответа (HTTP 200)
-
-JSON-массив словарей, каждый содержит:
-- `id` — целое число.
-- `name` — строка.
-- `base_url_masked` — строка (маскированный URL: только scheme и hostname).
-- `is_active` — булево значение.
-- `status` — строка: "healthy", "timeout", "unreachable", "error".
-- `response_time_ms` — число с плавающей точкой или null.
-
-### Тестирование
-
-Для защиты от регрессии при рефакторинге — ОБЯЗАТЕЛЬНО добавить интеграционный тест, который проверяет, что `GET /api/providers/health` возвращает HTTP 200 (а не 422, что означало бы ошибку парсинга "health" как целого числа для параметра `provider_id`).
+List all providers.
 
 ---
 
-## 6. Эндпоинт: PUT /api/providers/{provider_id}
+## 4. Endpoint: POST /api/providers/
 
-### Назначение
+### Purpose
 
-Обновление провайдера (смена ключа, URL).
+Create a new provider.
 
----
+### Request Body (ProviderCreateRequest schema)
 
-## 7. Эндпоинт: DELETE /api/providers/{provider_id}
-
-### Назначение
-
-Soft Delete провайдера.
-
----
-
-## 8. Безопасность
-
-- Все эндпоинты требуют HTTP Basic Auth через зависимость `get_current_user`.
-- API-ключи провайдеров НЕ возвращаются в ответе.
-- Поле `base_url` маскируется в health-check (возвращается только scheme и hostname) для предотвращения раскрытия внутренней инфраструктуры.
-- Health-check выполняется без авторизации на стороне провайдера (HEAD-запрос к base_url).
-- Результат health-check кэшируется на 30 секунд для защиты от каскадного отказа при частом polling.
+| Field      | Type   | Required | Description                 |
+|------------|--------|----------|-----------------------------|
+| `name`     | string | Yes      | Provider name               |
+| `api_key`  | string | Yes      | API key for authentication  |
+| `base_url` | string | Yes      | Base URL of the provider API|
 
 ---
 
-## 9. Обработка ошибок
+## 5. Endpoint: GET /api/providers/health
 
-| HTTP-статус | Когда                                    |
+### Purpose
+
+Returns the availability status of all active LLM providers. Used by the dashboard to display a provider status "traffic light".
+
+### Request Parameters
+
+No parameters (besides authentication).
+
+### Dependencies
+
+- `ProviderService` — via existing DI factory `get_provider_service`.
+- `httpx.AsyncClient` — via DI factory `get_http_client`.
+
+### Processing Algorithm
+
+1. Get `provider_service` and `http_client` via DI.
+2. **Caching**: before calling the service, check the in-memory health-check result cache. The cache is stored as a module variable (dict with `result` and `timestamp` keys). If the cache exists and its age is less than 30 seconds (TTL=30s) — return the cached result without executing network requests. This prevents cascading failures during frequent dashboard polling: if providers respond slowly, accumulated pending requests won't exhaust the httpx connection pool.
+3. If cache is absent or stale — call `provider_service.check_health(http_client)`.
+4. Save the result to cache with the current timestamp.
+5. Return the result as a JSON array with status 200.
+
+### Response Format (HTTP 200)
+
+JSON array of dicts, each containing:
+- `id` — integer.
+- `name` — string.
+- `base_url_masked` — string (masked URL: only scheme and hostname).
+- `is_active` — boolean.
+- `status` — string: "healthy", "timeout", "unreachable", "error".
+- `response_time_ms` — float or null.
+
+### Testing
+
+To protect against regression during refactoring — an integration test MUST be added that verifies `GET /api/providers/health` returns HTTP 200 (not 422, which would indicate "health" being parsed as an integer for the `provider_id` parameter).
+
+---
+
+## 6. Endpoint: PUT /api/providers/{provider_id}
+
+### Purpose
+
+Update a provider (change key, URL).
+
+---
+
+## 7. Endpoint: DELETE /api/providers/{provider_id}
+
+### Purpose
+
+Soft Delete a provider.
+
+---
+
+## 8. Security
+
+- All endpoints require HTTP Basic Auth via the `get_current_user` dependency.
+- Provider API keys are NOT returned in responses.
+- The `base_url` field is masked in health checks (only scheme and hostname returned) to prevent internal infrastructure disclosure.
+- Health checks are performed without provider-side authorization (HEAD request to base_url).
+- Health-check results are cached for 30 seconds to protect against cascading failures during frequent polling.
+
+---
+
+## 9. Error Handling
+
+| HTTP Status | When                                     |
 |-------------|------------------------------------------|
-| 200         | Успешная операция                        |
-| 201         | Успешное создание ресурса                |
-| 401         | Невалидный токен / не авторизован        |
-| 404         | Ресурс не найден                         |
-| 422         | Невалидный JSON (Pydantic)               |
-| 500         | Внутренняя ошибка сервера                |
+| 200         | Successful operation                     |
+| 201         | Successful resource creation             |
+| 401         | Invalid token / unauthorized             |
+| 404         | Resource not found                       |
+| 422         | Invalid JSON (Pydantic)                  |
+| 500         | Internal server error                    |

@@ -1,138 +1,138 @@
-# Спецификация: Контракты (Абстрактные интерфейсы)
+# Specification: Contracts (Abstract Interfaces)
 
-> **Файл реализации:** `gateway_provider.py`  
-> **Слой:** Domain (чистое ядро)  
-> **Ответственность:** Определение абстрактных интерфейсов для адаптеров провайдеров
-
----
-
-## 1. Общие правила
-
-- Контракты реализуются как абстрактные классы (`abc.ABC` + `abc.abstractmethod`).
-- Контракт **не импортирует** ничего из слоёв `infrastructure`, `services` или `api`.
-- Контракт оперирует **исключительно** доменными DTO: `UnifiedPrompt`, `UnifiedResponse`, `GatewayError`.
-- Все методы — **асинхронные** (`async def`).
+> **Implementation file:** `gateway_provider.py`  
+> **Layer:** Domain (pure core)  
+> **Responsibility:** Defining abstract interfaces for provider adapters
 
 ---
 
-## 2. Интерфейс: GatewayProvider
+## 1. General Rules
 
-### Назначение
+- Contracts are implemented as abstract classes (`abc.ABC` + `abc.abstractmethod`).
+- A contract **does not import** anything from the `infrastructure`, `services`, or `api` layers.
+- A contract operates **exclusively** with domain DTOs: `UnifiedPrompt`, `UnifiedResponse`, `GatewayError`.
+- All methods are **asynchronous** (`async def`).
 
-Базовый контракт, который обязан реализовать каждый адаптер внешнего LLM-провайдера.
-Обеспечивает полную изоляцию ядра от вендор-специфичной логики.
+---
 
-### Свойства (properties)
+## 2. Interface: GatewayProvider
 
-| Свойство        | Тип    | Описание                                    |
-|-----------------|--------|---------------------------------------------|
-| `provider_name` | `str`  | Уникальное имя провайдера (например, "portkey") |
+### Purpose
 
-### Методы
+The base contract that every external LLM provider adapter must implement.
+Ensures complete isolation of the core from vendor-specific logic.
+
+### Properties
+
+| Property        | Type   | Description                                     |
+|-----------------|--------|-------------------------------------------------|
+| `provider_name` | `str`  | Unique provider name (e.g., "portkey")          |
+
+### Methods
 
 #### 2.1. `send_prompt(prompt: UnifiedPrompt, api_key: str, base_url: str) -> UnifiedResponse | GatewayError`
 
-**Назначение:** Отправка запроса к LLM-провайдеру.
+**Purpose:** Send a request to the LLM provider.
 
-**Пошаговая логика (реализуется в адаптере):**
+**Step-by-step logic (implemented in the adapter):**
 
-1. Принять `UnifiedPrompt` и учётные данные (`api_key`, `base_url`).
-2. Трансформировать `UnifiedPrompt` в вендор-специфичный формат запроса.
-3. Выполнить асинхронный HTTP-вызов к API провайдера с таймаутом.
-4. При успехе — трансформировать ответ провайдера в `UnifiedResponse`.
-5. При ошибке — вернуть `GatewayError` с соответствующим кодом.
+1. Accept `UnifiedPrompt` and credentials (`api_key`, `base_url`).
+2. Transform `UnifiedPrompt` into the vendor-specific request format.
+3. Execute an asynchronous HTTP call to the provider API with a timeout.
+4. On success — transform the provider response into `UnifiedResponse`.
+5. On error — return `GatewayError` with the appropriate error code.
 
-**Параметры:**
+**Parameters:**
 
-| Параметр   | Тип              | Описание                                    |
-|------------|------------------|---------------------------------------------|
-| `prompt`   | `UnifiedPrompt`  | Стандартизированный запрос                   |
-| `api_key`  | `str`            | Актуальный API-ключ (из БД, не кэшированный)|
-| `base_url` | `str`            | Базовый URL API провайдера                  |
+| Parameter  | Type             | Description                                     |
+|------------|------------------|-------------------------------------------------|
+| `prompt`   | `UnifiedPrompt`  | Standardized request                            |
+| `api_key`  | `str`            | Current API key (from DB, not cached)           |
+| `base_url` | `str`            | Base URL of the provider API                    |
 
-**Возвращает:** `UnifiedResponse` при успехе, `GatewayError` при ошибке.
+**Returns:** `UnifiedResponse` on success, `GatewayError` on error.
 
 ---
 
 #### 2.2. `create_guardrail(config: dict, api_key: str, base_url: str) -> dict | GatewayError`
 
-**Назначение:** Создание политики безопасности (Guardrail) на стороне провайдера.
+**Purpose:** Create a security policy (Guardrail) on the provider side.
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Принять JSON-конфигурацию политики и учётные данные.
-2. Отправить POST-запрос к API провайдера для создания Guardrail.
-3. При успехе — вернуть словарь с `remote_id` и метаданными.
-4. При ошибке — вернуть `GatewayError`.
+1. Accept the JSON policy configuration and credentials.
+2. Send a POST request to the provider API to create the Guardrail.
+3. On success — return a dict with `remote_id` and metadata.
+4. On error — return `GatewayError`.
 
-**Параметры:**
+**Parameters:**
 
-| Параметр   | Тип    | Описание                                    |
-|------------|--------|---------------------------------------------|
-| `config`   | `dict` | JSON-тело конфигурации Guardrail            |
-| `api_key`  | `str`  | Актуальный API-ключ                         |
-| `base_url` | `str`  | Базовый URL API провайдера                  |
+| Parameter  | Type   | Description                                     |
+|------------|--------|-------------------------------------------------|
+| `config`   | `dict` | JSON body of the Guardrail configuration        |
+| `api_key`  | `str`  | Current API key                                 |
+| `base_url` | `str`  | Base URL of the provider API                    |
 
-**Возвращает:** `dict` с ключом `remote_id` при успехе, `GatewayError` при ошибке.
+**Returns:** `dict` with key `remote_id` on success, `GatewayError` on error.
 
 ---
 
 #### 2.3. `update_guardrail(remote_id: str, config: dict, api_key: str, base_url: str) -> dict | GatewayError`
 
-**Назначение:** Обновление существующей политики безопасности на стороне провайдера.
+**Purpose:** Update an existing security policy on the provider side.
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Принять `remote_id` существующей политики, новую конфигурацию и учётные данные.
-2. Отправить PUT-запрос к API провайдера.
-3. При успехе — вернуть обновлённые метаданные.
-4. При ошибке — вернуть `GatewayError`.
+1. Accept the `remote_id` of the existing policy, the new configuration, and credentials.
+2. Send a PUT request to the provider API.
+3. On success — return updated metadata.
+4. On error — return `GatewayError`.
 
-**Параметры:**
+**Parameters:**
 
-| Параметр    | Тип    | Описание                                    |
-|-------------|--------|---------------------------------------------|
-| `remote_id` | `str`  | Идентификатор политики на стороне вендора    |
-| `config`    | `dict` | Новое JSON-тело конфигурации                |
-| `api_key`   | `str`  | Актуальный API-ключ                         |
-| `base_url`  | `str`  | Базовый URL API провайдера                  |
+| Parameter   | Type   | Description                                     |
+|-------------|--------|-------------------------------------------------|
+| `remote_id` | `str`  | Vendor-side policy identifier                   |
+| `config`    | `dict` | New JSON configuration body                     |
+| `api_key`   | `str`  | Current API key                                 |
+| `base_url`  | `str`  | Base URL of the provider API                    |
 
-**Возвращает:** `dict` при успехе, `GatewayError` при ошибке.
+**Returns:** `dict` on success, `GatewayError` on error.
 
 ---
 
 #### 2.4. `delete_guardrail(remote_id: str, api_key: str, base_url: str) -> bool | GatewayError`
 
-**Назначение:** Удаление политики безопасности на стороне провайдера.
+**Purpose:** Delete a security policy on the provider side.
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Принять `remote_id` и учётные данные.
-2. Отправить DELETE-запрос к API провайдера.
-3. При успехе — вернуть `True`.
-4. При ошибке — вернуть `GatewayError`.
+1. Accept `remote_id` and credentials.
+2. Send a DELETE request to the provider API.
+3. On success — return `True`.
+4. On error — return `GatewayError`.
 
-**Возвращает:** `True` при успехе, `GatewayError` при ошибке.
+**Returns:** `True` on success, `GatewayError` on error.
 
 ---
 
 #### 2.5. `list_guardrails(api_key: str, base_url: str) -> list[dict] | GatewayError`
 
-**Назначение:** Получение списка всех политик безопасности от провайдера (для синхронизации).
+**Purpose:** Retrieve the list of all security policies from the provider (for synchronization).
 
-**Пошаговая логика:**
+**Step-by-step logic:**
 
-1. Принять учётные данные.
-2. Отправить GET-запрос к API провайдера.
-3. При успехе — вернуть список словарей с данными политик.
-4. При ошибке — вернуть `GatewayError`.
+1. Accept credentials.
+2. Send a GET request to the provider API.
+3. On success — return a list of dicts with policy data.
+4. On error — return `GatewayError`.
 
-**Возвращает:** `list[dict]` при успехе, `GatewayError` при ошибке.
+**Returns:** `list[dict]` on success, `GatewayError` on error.
 
 ---
 
-## 3. Обработка ошибок
+## 3. Error Handling
 
-- Все методы **никогда не выбрасывают исключения** наружу.
-- Любая ошибка (сетевая, таймаут, невалидный ответ) оборачивается в `GatewayError`.
-- Это позволяет вышестоящим слоям обрабатывать ошибки единообразно через проверку типа возвращаемого значения.
+- All methods **never raise exceptions** to the caller.
+- Any error (network, timeout, invalid response) is wrapped in `GatewayError`.
+- This allows upstream layers to handle errors uniformly via return type checking.

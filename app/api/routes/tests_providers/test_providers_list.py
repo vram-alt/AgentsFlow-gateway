@@ -2,7 +2,7 @@
 Тесты для GET /api/providers/ — список всех провайдеров.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md
+Specification: app/api/routes/providers_spec.md
 """
 
 import pytest
@@ -18,7 +18,7 @@ from app.api.routes.tests_providers.conftest import _make_fake_provider
 
 
 class TestListProviders:
-    """Тесты для GET /api/providers/ — список провайдеров."""
+    """Tests for GET /api/providers/ — список провайдеров."""
 
     def test_list_providers_returns_200(
         self, client: TestClient, mock_provider_service: MagicMock

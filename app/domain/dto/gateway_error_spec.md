@@ -1,57 +1,57 @@
-# Спецификация: DTO GatewayError (gateway_error.py)
+# Specification: DTO GatewayError (gateway_error.py)
 
-> **Файл реализации:** `gateway_error.py`  
-> **Слой:** Domain (чистое ядро, 0 внешних зависимостей кроме Pydantic)  
-> **Ответственность:** Стандартизированное представление ошибки, возникшей при взаимодействии с провайдером
+> **Implementation file:** `gateway_error.py`  
+> **Layer:** Domain (pure core, zero external dependencies except Pydantic)  
+> **Responsibility:** Standardized representation of an error that occurred during provider interaction
 
 ---
 
-## 1. Общие правила
+## 1. General Rules
 
-- DTO — это **неизменяемая** (frozen) Pydantic-модель для передачи данных между слоями.
-- Модель должна быть сконфигурирована как неизменяемая (frozen) через механизм конфигурации Pydantic V2.
-- GatewayError используется как возвращаемое значение (не как исключение) для единообразной обработки ошибок через проверку типа.
+- The DTO is an **immutable** (frozen) Pydantic model for transferring data between layers.
+- The model must be configured as immutable (frozen) via the Pydantic V2 configuration mechanism.
+- GatewayError is used as a return value (not as an exception) for uniform error handling via type checking.
 
 ---
 
 ## 2. DTO: GatewayError
 
-### Назначение
+### Purpose
 
-Стандартизированное представление ошибки, возникшей при взаимодействии с провайдером.
+Standardized representation of an error that occurred during provider interaction.
 
-### Поля
+### Fields
 
-| Поле           | Тип              | Обязательное | По умолчанию   | Описание                                          |
-|----------------|------------------|--------------|----------------|---------------------------------------------------|
-| `trace_id`     | строка           | Да           | —              | UUID v4 сквозного идентификатора                  |
-| `error_code`   | строка           | Да           | —              | Код ошибки (например, "TIMEOUT", "AUTH_FAILED")   |
-| `message`      | строка           | Да           | —              | Человекочитаемое описание ошибки                  |
-| `status_code`  | целое число      | Нет          | 500            | HTTP-статус код                                   |
-| `provider_name`| строка или None  | Нет          | None           | Имя провайдера, вызвавшего ошибку                 |
-| `details`      | словарь          | Нет          | пустой словарь | Дополнительные данные для отладки                 |
+| Field          | Type             | Required | Default        | Description                                       |
+|----------------|------------------|----------|----------------|---------------------------------------------------|
+| `trace_id`     | string           | Yes      | —              | UUID v4 correlation identifier                    |
+| `error_code`   | string           | Yes      | —              | Error code (e.g., "TIMEOUT", "AUTH_FAILED")       |
+| `message`      | string           | Yes      | —              | Human-readable error description                  |
+| `status_code`  | integer          | No       | 500            | HTTP status code                                  |
+| `provider_name`| string or None   | No       | None           | Name of the provider that caused the error        |
+| `details`      | dict             | No       | empty dict     | Additional data for debugging                     |
 
-### Стандартные коды ошибок (константы)
+### Standard Error Codes (Constants)
 
-| Код константы      | Описание                                              |
+| Code Constant      | Description                                           |
 |--------------------|-------------------------------------------------------|
-| TIMEOUT            | Превышен таймаут ожидания ответа от провайдера        |
-| AUTH_FAILED        | Ошибка аутентификации (невалидный API-ключ)           |
-| PROVIDER_ERROR     | Внутренняя ошибка на стороне провайдера               |
-| VALIDATION_ERROR   | Невалидные входные данные                             |
-| RATE_LIMITED       | Превышен лимит запросов                               |
-| UNKNOWN            | Неизвестная ошибка                                    |
+| TIMEOUT            | Provider response timeout exceeded                    |
+| AUTH_FAILED        | Authentication error (invalid API key)                |
+| PROVIDER_ERROR     | Internal error on the provider side                   |
+| VALIDATION_ERROR   | Invalid input data                                    |
+| RATE_LIMITED       | Request rate limit exceeded                           |
+| UNKNOWN            | Unknown error                                         |
 
-### Валидация
+### Validation
 
-- `trace_id`: формат UUID v4.
-- `error_code`: непустая строка.
-- `message`: непустая строка.
-- `status_code`: в диапазоне [400, 599].
+- `trace_id`: UUID v4 format.
+- `error_code`: non-empty string.
+- `message`: non-empty string.
+- `status_code`: in range [400, 599].
 
 ---
 
-## 3. Обработка ошибок
+## 3. Error Handling
 
-При невалидных данных выбрасывается стандартный pydantic.ValidationError.
-Трансформация ошибок в HTTP-ответы — ответственность слоя api/.
+A standard pydantic.ValidationError is raised on invalid data.
+Transforming errors into HTTP responses is the responsibility of the api/ layer.

@@ -1,7 +1,7 @@
 """
-Общие фикстуры для тестов роутера журнала событий (logs).
+Shared fixtures for event log router tests (logs).
 
-Извлечены из app/api/routes/test_logs.py при рефакторинге.
+Extracted from app/api/routes/test_logs.py during refactoring.
 """
 
 import pytest
@@ -16,7 +16,7 @@ from app.api.dependencies.di import get_log_service
 
 @pytest.fixture()
 def mock_log_service() -> MagicMock:
-    """Мок LogService — все методы возвращают AsyncMock."""
+    """Mock LogService — all methods return AsyncMock."""
     service = MagicMock(spec=LogService)
     service.get_logs = AsyncMock(return_value=[])
     service.get_logs_by_trace_id = AsyncMock(return_value=[])
@@ -27,8 +27,8 @@ def mock_log_service() -> MagicMock:
 @pytest.fixture()
 def client(mock_log_service: MagicMock) -> TestClient:
     """
-    TestClient с подменённым LogService через dependency_overrides.
-    HTTP Basic Auth отключён для изоляции тестов роутинга.
+    TestClient with LogService substituted via dependency_overrides.
+    HTTP Basic Auth disabled for routing test isolation.
     """
     from app.api.middleware.auth import get_current_user
 
@@ -43,7 +43,7 @@ def client(mock_log_service: MagicMock) -> TestClient:
 
 @pytest.fixture()
 def auth_headers() -> dict[str, str]:
-    """Заголовки HTTP Basic Auth для авторизованных запросов."""
+    """HTTP Basic Auth headers for authorized requests."""
     import base64
 
     credentials = base64.b64encode(b"admin:admin").decode("utf-8")

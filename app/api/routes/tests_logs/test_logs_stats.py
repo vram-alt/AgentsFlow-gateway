@@ -2,7 +2,7 @@
 Тесты для GET /api/logs/stats — статистика событий.
 
 Извлечены из app/api/routes/test_logs.py при рефакторинге.
-Спецификация: app/api/routes/logs_spec.md
+Specification: app/api/routes/logs_spec.md
 """
 
 import pytest
@@ -16,7 +16,7 @@ from fastapi.testclient import TestClient
 
 
 class TestGetLogStats:
-    """Тесты для GET /api/logs/stats."""
+    """Tests for GET /api/logs/stats."""
 
     def test_get_log_stats_returns_200(
         self, client: TestClient, mock_log_service: MagicMock, auth_headers: dict

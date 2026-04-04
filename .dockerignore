@@ -26,9 +26,8 @@ htmlcov/
 docs/
 *.md
 
-# Databases (local)
-*.db
-*.sqlite
+# Databases (local dev copies only — data/gateway.db is kept for seed)
+# *.db — REMOVED to allow data/gateway.db seed copy
 *.sqlite3
 
 # IDE
@@ -50,3 +49,6 @@ docker-compose.yml
 # Misc
 .roo/
 Makefile
+
+# Frontend (built separately)
+frontend/

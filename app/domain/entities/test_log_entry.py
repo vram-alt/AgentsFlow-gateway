@@ -1,13 +1,13 @@
 """
-TDD Red-фаза: тесты для Pydantic-моделей сущности LogEntry.
+TDD Red phase: тесты для Pydantic-моделей сущности LogEntry.
 
-Тестируемые схемы (из log_entry.py):
+Tested schemas (из log_entry.py):
   - EventType (str Enum)
   - LogEntryCreate
   - LogEntry
 
-Архитектурное правило: логи иммутабельны — схемы Update НЕТ.
-Никакого SQLAlchemy / БД — только чистая Pydantic-валидация.
+Architectural rule: logs are immutable — no Update schema.
+No SQLAlchemy / DB — pure Pydantic validation only.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ import pytest
 from pydantic import ValidationError
 
 # --------------------------------------------------------------------------
-# Импорт тестируемых моделей (должен упасть на Red-фазе, т.к. log_entry.py пуст)
+# Import tested models (should fail during Red phase since log_entry.py is empty)
 # --------------------------------------------------------------------------
 from app.domain.entities.log_entry import (
     EventType,
@@ -29,7 +29,7 @@ from app.domain.entities.log_entry import (
 
 
 # ==========================================================================
-# Фикстуры
+# Fixtures
 # ==========================================================================
 
 VALID_TRACE_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
@@ -37,7 +37,7 @@ VALID_TRACE_ID = "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d"
 
 @pytest.fixture()
 def valid_log_data() -> dict:
-    """Минимальный набор обязательных полей для создания записи лога."""
+    """Minimal set of required fields for creating a log record."""
     return {
         "trace_id": VALID_TRACE_ID,
         "event_type": EventType.CHAT_REQUEST,
@@ -47,7 +47,7 @@ def valid_log_data() -> dict:
 
 @pytest.fixture()
 def full_log_data(valid_log_data: dict) -> dict:
-    """Полный набор полей, включая id и created_at."""
+    """Full set of fields, including id and created_at."""
     now = datetime.datetime.now(datetime.timezone.utc)
     return {
         **valid_log_data,
@@ -62,45 +62,45 @@ def full_log_data(valid_log_data: dict) -> dict:
 
 
 class TestEventType:
-    """Тесты для Enum EventType."""
+    """Tests for Enum EventType."""
 
     def test_chat_request_value(self) -> None:
-        """CHAT_REQUEST имеет строковое значение 'chat_request'."""
+        """CHAT_REQUEST has string value 'chat_request'."""
         assert EventType.CHAT_REQUEST == "chat_request"
         assert EventType.CHAT_REQUEST.value == "chat_request"
 
     def test_guardrail_incident_value(self) -> None:
-        """GUARDRAIL_INCIDENT имеет строковое значение 'guardrail_incident'."""
+        """GUARDRAIL_INCIDENT has string value 'guardrail_incident'."""
         assert EventType.GUARDRAIL_INCIDENT == "guardrail_incident"
         assert EventType.GUARDRAIL_INCIDENT.value == "guardrail_incident"
 
     def test_system_error_value(self) -> None:
-        """SYSTEM_ERROR имеет строковое значение 'system_error'."""
+        """SYSTEM_ERROR has string value 'system_error'."""
         assert EventType.SYSTEM_ERROR == "system_error"
         assert EventType.SYSTEM_ERROR.value == "system_error"
 
     def test_exactly_three_members(self) -> None:
-        """EventType содержит ровно 3 значения."""
+        """EventType contains exactly 3 values."""
         assert len(EventType) == 3
 
     def test_is_string_subclass(self) -> None:
-        """EventType наследует от str — каждый член является строкой."""
+        """EventType inherits from str — each member is a string."""
         for member in EventType:
             assert isinstance(member, str)
 
     def test_members_list(self) -> None:
-        """Все допустимые значения перечислены."""
+        """All allowed values are listed."""
         values = {e.value for e in EventType}
         assert values == {"chat_request", "guardrail_incident", "system_error"}
 
     def test_lookup_by_value(self) -> None:
-        """Можно получить член Enum по строковому значению."""
+        """Can retrieve an Enum member by string value."""
         assert EventType("chat_request") is EventType.CHAT_REQUEST
         assert EventType("guardrail_incident") is EventType.GUARDRAIL_INCIDENT
         assert EventType("system_error") is EventType.SYSTEM_ERROR
 
     def test_invalid_value_raises(self) -> None:
-        """Невалидное значение вызывает ValueError."""
+        """Invalid value raises ValueError."""
         with pytest.raises(ValueError):
             EventType("unknown_event")
 
@@ -114,7 +114,7 @@ class TestLogEntryCreate:
     """LogEntryCreate: обязательные поля trace_id, event_type, payload."""
 
     def test_valid_creation(self, valid_log_data: dict) -> None:
-        """Создание LogEntryCreate с валидными данными."""
+        """Creation of LogEntryCreate with valid data."""
         entry = LogEntryCreate(**valid_log_data)
         assert entry.trace_id == VALID_TRACE_ID
         assert entry.event_type == EventType.CHAT_REQUEST
@@ -131,7 +131,7 @@ class TestLogEntryCreate:
             assert entry.event_type == et
 
     def test_event_type_from_string(self) -> None:
-        """event_type принимает строковое значение и приводит к Enum."""
+        """event_type accepts строковое значение и приводит к Enum."""
         entry = LogEntryCreate(
             trace_id=VALID_TRACE_ID,
             event_type="guardrail_incident",
@@ -145,7 +145,7 @@ class TestLogEntryCreate:
     # ------------------------------------------------------------------
 
     def test_trace_id_required(self) -> None:
-        """trace_id — обязательное поле; без него ValidationError."""
+        """trace_id — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             LogEntryCreate(
                 event_type=EventType.CHAT_REQUEST,
@@ -160,37 +160,37 @@ class TestLogEntryCreate:
 
     def test_trace_id_invalid_format_rejected(self, valid_log_data: dict) -> None:
         """
-        trace_id не в формате UUID отклоняется.
+        trace_id не в формате UUID is rejected.
         [SRE_MARKER] — невалидный trace_id сломает корреляцию логов.
         """
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "trace_id": "not-a-uuid"})
 
     def test_trace_id_too_short_rejected(self, valid_log_data: dict) -> None:
-        """trace_id короче 36 символов отклоняется."""
+        """trace_id короче 36 символов is rejected."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "trace_id": "12345"})
 
     def test_trace_id_too_long_rejected(self, valid_log_data: dict) -> None:
-        """trace_id длиннее 36 символов отклоняется."""
+        """trace_id длиннее 36 символов is rejected."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "trace_id": VALID_TRACE_ID + "extra"})
 
     def test_trace_id_without_dashes_rejected(self, valid_log_data: dict) -> None:
-        """UUID без дефисов (32 hex символа) отклоняется — нужен формат с дефисами."""
+        """UUID без дефисов (32 hex символа) is rejected — нужен формат с дефисами."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "trace_id": uuid.uuid4().hex})
 
     def test_trace_id_uppercase_accepted(self, valid_log_data: dict) -> None:
         """UUID в верхнем регистре — допустимый формат (36 символов с дефисами)."""
         upper_uuid = str(uuid.uuid4()).upper()
-        # Должен либо пройти, либо быть нормализован — зависит от реализации.
-        # Спецификация говорит «формат UUID v4 (36 символов с дефисами)».
+        # Should either pass or be normalized — depends on implementation.
+        # Specification says "UUID v4 format (36 characters with hyphens)".
         entry = LogEntryCreate(**{**valid_log_data, "trace_id": upper_uuid})
         assert len(entry.trace_id) == 36
 
     def test_trace_id_empty_string_rejected(self, valid_log_data: dict) -> None:
-        """Пустая строка trace_id отклоняется."""
+        """Empty string trace_id is rejected."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "trace_id": ""})
 
@@ -199,7 +199,7 @@ class TestLogEntryCreate:
     # ------------------------------------------------------------------
 
     def test_event_type_required(self) -> None:
-        """event_type — обязательное поле; без него ValidationError."""
+        """event_type — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             LogEntryCreate(
                 trace_id=VALID_TRACE_ID,
@@ -208,19 +208,19 @@ class TestLogEntryCreate:
 
     def test_event_type_invalid_string_rejected(self, valid_log_data: dict) -> None:
         """
-        Произвольная строка для event_type отклоняется.
+        Произвольная строка для event_type is rejected.
         [SRE_MARKER] — неизвестный тип события может обойти фильтрацию аудита.
         """
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "event_type": "unknown_event"})
 
     def test_event_type_none_rejected(self, valid_log_data: dict) -> None:
-        """event_type не может быть None."""
+        """event_type cannot be None."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "event_type": None})
 
     def test_event_type_integer_rejected(self, valid_log_data: dict) -> None:
-        """event_type не может быть числом."""
+        """event_type cannot be an integer."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "event_type": 42})
 
@@ -229,7 +229,7 @@ class TestLogEntryCreate:
     # ------------------------------------------------------------------
 
     def test_payload_required(self) -> None:
-        """payload — обязательное поле; без него ValidationError."""
+        """payload — required field; without it ValidationError."""
         with pytest.raises(ValidationError):
             LogEntryCreate(
                 trace_id=VALID_TRACE_ID,
@@ -238,7 +238,7 @@ class TestLogEntryCreate:
 
     def test_payload_empty_dict_rejected(self, valid_log_data: dict) -> None:
         """
-        Пустой словарь payload отклоняется (минимум 1 ключ).
+        Пустой словарь payload is rejected (minimum 1 key).
         [SRE_MARKER] — пустой payload в аудит-логе бесполезен и может
         скрыть инцидент безопасности.
         """
@@ -246,22 +246,22 @@ class TestLogEntryCreate:
             LogEntryCreate(**{**valid_log_data, "payload": {}})
 
     def test_payload_must_be_dict(self, valid_log_data: dict) -> None:
-        """payload должен быть словарём, а не строкой."""
+        """payload must be a dict, not a string."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "payload": "not a dict"})
 
     def test_payload_list_rejected(self, valid_log_data: dict) -> None:
-        """payload не может быть списком."""
+        """payload cannot be a list."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "payload": [1, 2, 3]})
 
     def test_payload_none_rejected(self, valid_log_data: dict) -> None:
-        """payload не может быть None."""
+        """payload cannot be None."""
         with pytest.raises(ValidationError):
             LogEntryCreate(**{**valid_log_data, "payload": None})
 
     def test_payload_complex_nested_dict(self, valid_log_data: dict) -> None:
-        """payload принимает сложный вложенный словарь."""
+        """payload accepts a complex nested dict."""
         complex_payload = {
             "prompt": "Translate this",
             "response": {"text": "Переведи это", "tokens": 15},
@@ -275,7 +275,7 @@ class TestLogEntryCreate:
     # ------------------------------------------------------------------
 
     def test_missing_all_fields(self) -> None:
-        """Без обязательных полей — ValidationError."""
+        """Without required fields — ValidationError."""
         with pytest.raises(ValidationError):
             LogEntryCreate()
 
@@ -286,10 +286,10 @@ class TestLogEntryCreate:
 
 
 class TestLogEntry:
-    """LogEntry: полная сущность с id и created_at."""
+    """LogEntry: полная сущность с id and created_at."""
 
     def test_valid_full_creation(self, full_log_data: dict) -> None:
-        """Создание полной сущности LogEntry со всеми полями."""
+        """Creation of полной сущности LogEntry with all fields."""
         entry = LogEntry(**full_log_data)
         assert entry.id == 1
         assert entry.trace_id == VALID_TRACE_ID
@@ -298,12 +298,12 @@ class TestLogEntry:
         assert isinstance(entry.created_at, datetime.datetime)
 
     def test_id_defaults_to_none(self, valid_log_data: dict) -> None:
-        """id по умолчанию None (назначается БД)."""
+        """id defaults to None (assigned by DB)."""
         entry = LogEntry(**valid_log_data)
         assert entry.id is None
 
     def test_created_at_auto_generated(self, valid_log_data: dict) -> None:
-        """created_at генерируется автоматически через default_factory."""
+        """created_at is auto-generated via default_factory."""
         before = datetime.datetime.now(datetime.timezone.utc)
         entry = LogEntry(**valid_log_data)
         after = datetime.datetime.now(datetime.timezone.utc)
@@ -311,12 +311,12 @@ class TestLogEntry:
         assert before <= entry.created_at <= after
 
     def test_created_at_is_timezone_aware(self, valid_log_data: dict) -> None:
-        """created_at должен быть timezone-aware (UTC)."""
+        """created_at must be timezone-aware (UTC)."""
         entry = LogEntry(**valid_log_data)
         assert entry.created_at.tzinfo is not None
 
     def test_created_at_utc_timezone(self, valid_log_data: dict) -> None:
-        """created_at должен быть именно в UTC."""
+        """created_at must be in UTC."""
         entry = LogEntry(**valid_log_data)
         assert entry.created_at.tzinfo == datetime.timezone.utc
 
@@ -330,31 +330,31 @@ class TestLogEntry:
         """
         entry1 = LogEntry(**valid_log_data)
         entry2 = LogEntry(**valid_log_data)
-        # Объекты datetime должны быть разными экземплярами
+        # datetime objects must be different instances
         assert entry1.created_at is not entry2.created_at
 
     def test_inherits_trace_id_validation(self, valid_log_data: dict) -> None:
-        """LogEntry наследует валидацию trace_id."""
+        """LogEntry inherits validation of trace_id."""
         with pytest.raises(ValidationError):
             LogEntry(**{**valid_log_data, "trace_id": "not-a-uuid"})
 
     def test_inherits_event_type_validation(self, valid_log_data: dict) -> None:
-        """LogEntry наследует валидацию event_type."""
+        """LogEntry inherits validation of event_type."""
         with pytest.raises(ValidationError):
             LogEntry(**{**valid_log_data, "event_type": "invalid_type"})
 
     def test_inherits_payload_validation(self, valid_log_data: dict) -> None:
-        """LogEntry наследует валидацию payload (не пустой dict)."""
+        """LogEntry inherits validation of payload (не пустой dict)."""
         with pytest.raises(ValidationError):
             LogEntry(**{**valid_log_data, "payload": {}})
 
     def test_id_accepts_integer(self, valid_log_data: dict) -> None:
-        """id принимает целое число."""
+        """id accepts an integer."""
         entry = LogEntry(**{**valid_log_data, "id": 42})
         assert entry.id == 42
 
     def test_id_accepts_none(self, valid_log_data: dict) -> None:
-        """id принимает None."""
+        """id accepts None."""
         entry = LogEntry(**{**valid_log_data, "id": None})
         assert entry.id is None
 
@@ -376,7 +376,7 @@ class TestLogEntry:
         assert entry.trace_id == VALID_TRACE_ID
 
     def test_serialization_to_dict(self, full_log_data: dict) -> None:
-        """model_dump() возвращает словарь со всеми полями."""
+        """model_dump() возвращает словарь with all fields."""
         entry = LogEntry(**full_log_data)
         data = entry.model_dump()
         assert isinstance(data, dict)
@@ -388,7 +388,7 @@ class TestLogEntry:
 
     def test_no_update_schema_exists(self) -> None:
         """
-        Архитектурное правило: логи иммутабельны — схемы LogEntryUpdate НЕ существует.
+        Architectural rule: логи иммутабельны — схемы LogEntryUpdate НЕ существует.
         [SRE_MARKER] — если кто-то добавит LogEntryUpdate, аудит-лог
         станет мутабельным, что нарушит compliance.
         """

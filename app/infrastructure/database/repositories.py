@@ -1,8 +1,8 @@
 """
-Репозитории — CRUD-операции для AI Gateway.
+Repositories — CRUD operations for AI Gateway.
 
-Слой Infrastructure: инкапсуляция всех SQL-запросов.
-Сервисный слой работает с репозиториями, а не с ORM напрямую.
+Infrastructure layer: encapsulation of all SQL queries.
+The service layer works with repositories, not with ORM directly.
 """
 
 from __future__ import annotations
@@ -33,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderRepository:
-    """Репозиторий для работы с провайдерами (таблица providers)."""
+    """Repository for provider operations (providers table)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def get_active_by_name(self, name: str) -> Optional[ProviderModel]:
-        """Найти активного провайдера по имени."""
+        """Find an active provider by name."""
         stmt = select(ProviderModel).where(
             ProviderModel.name == name,
             ProviderModel.is_active == True,  # noqa: E712
@@ -48,13 +48,13 @@ class ProviderRepository:
         return result.scalar_one_or_none()
 
     async def get_by_id(self, provider_id: int) -> Optional[ProviderModel]:
-        """Найти провайдера по ID."""
+        """Find a provider by ID."""
         stmt = select(ProviderModel).where(ProviderModel.id == provider_id)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def list_all(self, only_active: bool = True) -> Sequence[ProviderModel]:
-        """Список всех (или только активных) провайдеров.
+        """List all (or only active) providers.
 
         [YEL] ORDER BY id for deterministic pagination.
         """
@@ -66,7 +66,7 @@ class ProviderRepository:
         return result.scalars().all()
 
     async def create(self, name: str, api_key: str, base_url: str) -> ProviderModel:
-        """Создать нового провайдера."""
+        """Create a new provider."""
         provider = ProviderModel(
             name=name,
             api_key=api_key,
@@ -78,7 +78,7 @@ class ProviderRepository:
         return provider
 
     async def update(self, provider_id: int, **fields: Any) -> Optional[ProviderModel]:
-        """Обновить поля провайдера."""
+        """Update provider fields."""
         stmt = select(ProviderModel).where(ProviderModel.id == provider_id)
         result = await self._session.execute(stmt)
         provider = result.scalar_one_or_none()
@@ -94,7 +94,7 @@ class ProviderRepository:
         return provider
 
     async def soft_delete(self, provider_id: int) -> bool:
-        """Пометить провайдера как неактивного (is_active=False)."""
+        """Mark a provider as inactive (is_active=False)."""
         stmt = select(ProviderModel).where(ProviderModel.id == provider_id)
         result = await self._session.execute(stmt)
         provider = result.scalar_one_or_none()
@@ -107,6 +107,21 @@ class ProviderRepository:
         await self._session.commit()
         return True
 
+    async def toggle_active(self, provider_id: int) -> Optional[ProviderModel]:
+        """Toggle is_active status of a provider."""
+        stmt = select(ProviderModel).where(ProviderModel.id == provider_id)
+        result = await self._session.execute(stmt)
+        provider = result.scalar_one_or_none()
+        if provider is None:
+            return None
+
+        provider.is_active = not provider.is_active
+        provider.updated_at = _utcnow()
+
+        await self._session.commit()
+        await self._session.refresh(provider)
+        return provider
+
 
 # ===================================================================
 # PolicyRepository
@@ -114,25 +129,25 @@ class ProviderRepository:
 
 
 class PolicyRepository:
-    """Репозиторий для работы с политиками (таблица policies)."""
+    """Repository for policy operations (policies table)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def get_by_id(self, policy_id: int) -> Optional[PolicyModel]:
-        """Найти политику по ID."""
+        """Find a policy by ID."""
         stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def get_by_remote_id(self, remote_id: str) -> Optional[PolicyModel]:
-        """Найти политику по remote_id вендора."""
+        """Find a policy by vendor remote_id."""
         stmt = select(PolicyModel).where(PolicyModel.remote_id == remote_id)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def list_all(self, only_active: bool = True) -> Sequence[PolicyModel]:
-        """Список всех (или только активных) политик.
+        """List all (or only active) policies.
 
         [YEL] ORDER BY id for deterministic pagination.
         """
@@ -144,7 +159,7 @@ class PolicyRepository:
         return result.scalars().all()
 
     async def list_by_provider(self, provider_id: int) -> Sequence[PolicyModel]:
-        """Политики конкретного провайдера."""
+        """Policies for a specific provider."""
         stmt = select(PolicyModel).where(PolicyModel.provider_id == provider_id)
         result = await self._session.execute(stmt)
         return result.scalars().all()
@@ -156,8 +171,8 @@ class PolicyRepository:
         remote_id: str,
         provider_id: int,
     ) -> PolicyModel:
-        """Создать новую политику. body (dict) сериализуется в JSON."""
-        body_json = json.dumps(body)  # ValueError/TypeError при невалидном объекте
+        """Create a new policy. body (dict) is serialized to JSON."""
+        body_json = json.dumps(body)  # ValueError/TypeError on invalid object
         policy = PolicyModel(
             name=name,
             body=body_json,
@@ -170,7 +185,7 @@ class PolicyRepository:
         return policy
 
     async def update(self, policy_id: int, **fields: Any) -> Optional[PolicyModel]:
-        """Обновить поля политики."""
+        """Update policy fields."""
         stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
         result = await self._session.execute(stmt)
         policy = result.scalar_one_or_none()
@@ -188,7 +203,7 @@ class PolicyRepository:
         return policy
 
     async def soft_delete(self, policy_id: int) -> bool:
-        """Пометить политику как неактивную (is_active=False)."""
+        """Mark a policy as inactive (is_active=False)."""
         stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
         result = await self._session.execute(stmt)
         policy = result.scalar_one_or_none()
@@ -201,6 +216,20 @@ class PolicyRepository:
         await self._session.commit()
         return True
 
+    async def toggle_active(self, policy_id: int) -> Optional[PolicyModel]:
+        """Toggle is_active status of a policy."""
+        stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
+        result = await self._session.execute(stmt)
+        policy = result.scalar_one_or_none()
+        if policy is None:
+            return None
+
+        policy.is_active = not policy.is_active
+        policy.updated_at = _utcnow()
+        await self._session.commit()
+        await self._session.refresh(policy)
+        return policy
+
     async def upsert_by_remote_id(
         self,
         remote_id: str,
@@ -208,7 +237,7 @@ class PolicyRepository:
         body: dict,
         provider_id: int,
     ) -> PolicyModel:
-        """Создать или обновить политику по remote_id (для синхронизации)."""
+        """Create or update a policy by remote_id (for synchronization)."""
         stmt = select(PolicyModel).where(PolicyModel.remote_id == remote_id)
         result = await self._session.execute(stmt)
         existing = result.scalar_one_or_none()
@@ -216,7 +245,7 @@ class PolicyRepository:
         body_json = json.dumps(body)
 
         if existing is None:
-            # Создаём новую запись
+            # Create a new record
             policy = PolicyModel(
                 name=name,
                 body=body_json,
@@ -228,7 +257,7 @@ class PolicyRepository:
             await self._session.refresh(policy)
             return policy
         else:
-            # Обновляем существующую
+            # Update existing record
             existing.name = name
             existing.body = body_json
             existing.provider_id = provider_id
@@ -245,7 +274,7 @@ class PolicyRepository:
 
 
 class LogRepository:
-    """Репозиторий для работы с журналом событий (таблица logs)."""
+    """Repository for audit log operations (logs table)."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -253,8 +282,8 @@ class LogRepository:
     async def create(
         self, trace_id: str, event_type: str, payload: dict
     ) -> LogEntryModel:
-        """Записать новое событие в журнал. payload (dict) сериализуется в JSON."""
-        payload_json = json.dumps(payload)  # ValueError/TypeError при невалидном
+        """Write a new event to the audit log. payload (dict) is serialized to JSON."""
+        payload_json = json.dumps(payload)  # ValueError/TypeError on invalid
         log_entry = LogEntryModel(
             trace_id=trace_id,
             event_type=event_type,
@@ -266,7 +295,7 @@ class LogRepository:
         return log_entry
 
     async def get_by_trace_id(self, trace_id: str) -> Sequence[LogEntryModel]:
-        """Все события по trace_id."""
+        """All events by trace_id."""
         stmt = select(LogEntryModel).where(LogEntryModel.trace_id == trace_id)
         result = await self._session.execute(stmt)
         return result.scalars().all()
@@ -274,7 +303,7 @@ class LogRepository:
     async def list_all(
         self, limit: int = 100, offset: int = 0
     ) -> Sequence[LogEntryModel]:
-        """Постраничный список всех событий.
+        """Paginated list of all events.
 
         [YEL] ORDER BY id for deterministic pagination.
         """
@@ -287,7 +316,7 @@ class LogRepository:
     async def list_by_type(
         self, event_type: str, limit: int = 100, offset: int = 0
     ) -> Sequence[LogEntryModel]:
-        """Фильтрация по типу события."""
+        """Filter by event type."""
         stmt = (
             select(LogEntryModel)
             .where(LogEntryModel.event_type == event_type)
@@ -299,31 +328,31 @@ class LogRepository:
         return result.scalars().all()
 
     async def count_all(self) -> int:
-        """Общее количество записей."""
+        """Total record count."""
         stmt = select(func.count(LogEntryModel.id))
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
     async def count_by_type(self, event_type: str) -> int:
-        """Количество записей определённого типа."""
+        """Record count for a specific type."""
         stmt = select(func.count(LogEntryModel.id)).where(
             LogEntryModel.event_type == event_type
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
 
-    # ── [UPGRADE] Новые методы ────────────────────────────────────────
+    # ── [UPGRADE] New methods ────────────────────────────────────────
 
     async def get_by_id(self, log_id: int) -> Optional[LogEntryModel]:
-        """Получение одной записи лога по числовому ID (upgrade spec §1)."""
+        """Retrieve a single log record by numeric ID (upgrade spec §1)."""
         stmt = select(LogEntryModel).where(LogEntryModel.id == log_id)
         result = await self._session.execute(stmt)
         return result.scalar_one_or_none()
 
     async def count_by_hour(self, since: datetime.datetime) -> list[tuple[str, int]]:
-        """Группировка записей по часовым интервалам (upgrade spec §2).
+        """Group records by hourly intervals (upgrade spec §2).
 
-        Возвращает список кортежей (hour_string, count).
+        Returns a list of tuples (hour_string, count).
         """
         hour_expr = _format_hour(self._session)
         stmt = (
@@ -336,7 +365,7 @@ class LogRepository:
         return result.all()  # type: ignore[return-value]
 
     async def aggregate_token_stats(self) -> dict[str, Any]:
-        """Агрегация статистики токенов и latency (upgrade spec §3)."""
+        """Aggregate token and latency statistics (upgrade spec §3)."""
         stmt = select(LogEntryModel).where(LogEntryModel.event_type == "chat_request")
         result = await self._session.execute(stmt)
         rows = result.scalars().all()
@@ -390,7 +419,7 @@ class LogRepository:
         event_type: str | None = None,
         limit: int = 5000,
     ) -> AsyncGenerator[LogEntryModel, None]:
-        """Получение записей для CSV-экспорта (upgrade spec §4).
+        """Retrieve records for CSV export (upgrade spec §4).
 
         [YEL-7] Yields entries one at a time from the result set to avoid
         holding the entire dataset in memory simultaneously.
@@ -409,9 +438,9 @@ class LogRepository:
 
 
 def _format_hour(session: AsyncSession) -> Any:
-    """Хелпер для форматирования даты по часам (upgrade spec §2.4).
+    """Helper for formatting dates by hour (upgrade spec §2.4).
 
-    Совместимость с SQLite и PostgreSQL.
+    Compatible with SQLite and PostgreSQL.
     """
     dialect_name = session.bind.dialect.name if session.bind else "sqlite"
     if dialect_name == "postgresql":

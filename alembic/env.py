@@ -19,10 +19,10 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# ---------- metadata для autogenerate ----------
+# ---------- metadata for autogenerate ----------
 target_metadata = Base.metadata
 
-# ---------- URL из .env через pydantic-settings ----------
+# ---------- URL from .env via pydantic-settings ----------
 _settings = get_settings()
 config.set_main_option("sqlalchemy.url", _settings.database_url)
 

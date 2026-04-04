@@ -117,6 +117,25 @@ async def update_policy(
     return JSONResponse(status_code=200, content=serialize(result))
 
 
+# ── PATCH /api/policies/{policy_id}/toggle ───────────────────────────
+@router.patch("/{policy_id}/toggle")
+async def toggle_policy(
+    policy_id: int,
+    policy_service: PolicyService = Depends(get_policy_service),
+    _current_user: str = Depends(get_current_user),
+) -> JSONResponse:
+    """Toggle is_active status of a policy."""
+    try:
+        result = await policy_service.toggle_policy(policy_id=policy_id)
+    except Exception as exc:
+        return internal_error_response(exc)
+
+    if is_gateway_error(result):
+        return gateway_error_response(result)
+
+    return JSONResponse(status_code=200, content=serialize(result))
+
+
 # ── DELETE /api/policies/{policy_id} ─────────────────────────────────
 @router.delete("/{policy_id}")
 async def delete_policy(

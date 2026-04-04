@@ -2,7 +2,7 @@
 Тесты для DELETE /api/providers/{provider_id} — soft delete провайдера.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md
+Specification: app/api/routes/providers_spec.md
 """
 
 import pytest
@@ -18,7 +18,7 @@ from app.api.routes.tests_providers.conftest import _make_gateway_error
 
 
 class TestDeleteProvider:
-    """Тесты для DELETE /api/providers/{provider_id} — удаление провайдера."""
+    """Tests for DELETE /api/providers/{provider_id} — удаление a provider."""
 
     def test_delete_provider_returns_200(
         self, client: TestClient, mock_provider_service: MagicMock
@@ -63,7 +63,7 @@ class TestDeleteProvider:
     def test_delete_provider_not_found_returns_404(
         self, client: TestClient, mock_provider_service: MagicMock
     ):
-        """Провайдер не найден — HTTP 404."""
+        """Provider not found — HTTP 404."""
         error = _make_gateway_error(404, "VALIDATION_ERROR", "Провайдер не найден")
         mock_provider_service.delete_provider.return_value = error
 

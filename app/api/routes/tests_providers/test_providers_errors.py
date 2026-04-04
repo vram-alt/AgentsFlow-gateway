@@ -2,7 +2,7 @@
 Тесты обработки ошибок, аутентификации и структуры ответов для провайдеров.
 
 Извлечены из app/api/routes/test_providers.py при рефакторинге.
-Спецификация: app/api/routes/providers_spec.md
+Specification: app/api/routes/providers_spec.md
 """
 
 import pytest

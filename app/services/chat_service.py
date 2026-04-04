@@ -1,7 +1,7 @@
 """
-ChatService — оркестратор полного цикла отправки промпта к LLM через адаптер.
+ChatService — orchestrator for the full prompt-to-LLM cycle via an adapter.
 
-Спецификация: app/services/chat_service_spec.md
+Specification: app/services/chat_service_spec.md
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatService:
-    """Оркестратор чата: провайдер → адаптер → лог → ответ."""
+    """Chat orchestrator: provider → adapter → log → response."""
 
     def __init__(
         self,
@@ -43,12 +43,12 @@ class ChatService:
         max_tokens: int | None = None,
         guardrail_ids: list[str] | None = None,
     ) -> UnifiedResponse | GatewayError:
-        """Полный цикл: получить провайдера → вызвать адаптер → залогировать → вернуть."""
+        """Full cycle: fetch provider → call adapter → log → return."""
 
         trace_id = str(uuid.uuid4())
         result: UnifiedResponse | GatewayError
 
-        # ── Шаг 1: Получение учётных данных провайдера ───────────────
+        # ── Step 1: Fetch provider credentials ───────────────
         try:
             provider_record = await self.provider_repo.get_active_by_name(provider_name)
         except Exception as exc:
@@ -56,7 +56,7 @@ class ChatService:
             result = GatewayError(
                 trace_id=trace_id,
                 error_code="UNKNOWN",
-                message=f"Database error: {exc}",
+                message=f"Failed to fetch provider credentials from database: {exc}",
             )
             await self._safe_log(trace_id=trace_id, prompt=None, response=result)
             return result
@@ -65,7 +65,7 @@ class ChatService:
             result = GatewayError(
                 trace_id=trace_id,
                 error_code="AUTH_FAILED",
-                message=f"Provider '{provider_name}' not found or deactivated",
+                message=f"Provider '{provider_name}' not found or inactive — add it in Configuration > Providers first",
             )
             await self._safe_log(trace_id=trace_id, prompt=None, response=result)
             return result
@@ -73,7 +73,7 @@ class ChatService:
         api_key: str = provider_record.api_key
         base_url: str = provider_record.base_url
 
-        # ── Шаг 2: Формирование UnifiedPrompt ────────────────────────
+        # ── Step 2: Build UnifiedPrompt ────────────────────────
         prompt = UnifiedPrompt(
             trace_id=trace_id,
             model=model,
@@ -83,7 +83,7 @@ class ChatService:
             guardrail_ids=guardrail_ids if guardrail_ids is not None else [],
         )
 
-        # ── Шаг 3: Отправка через адаптер ────────────────────────────
+        # ── Step 3: Send via adapter ────────────────────────────
         try:
             result = await self.adapter.send_prompt(prompt, api_key, base_url)
         except Exception as exc:
@@ -94,7 +94,7 @@ class ChatService:
                 message=f"Adapter error: {exc}",
             )
 
-        # ── Шаг 4: Логирование (не блокирует ответ) ──────────────────
+        # ── Step 4: Logging (does not block response) ──────────────────
         await self._safe_log(trace_id=trace_id, prompt=prompt, response=result)
 
         return result
@@ -105,7 +105,7 @@ class ChatService:
         prompt: UnifiedPrompt | None,
         response: UnifiedResponse | GatewayError,
     ) -> None:
-        """Вызывает log_service.log_chat_request, подавляя любые исключения."""
+        """Call log_service.log_chat_request, suppressing any exceptions."""
         try:
             prompt_data: dict[str, Any] = (
                 prompt.model_dump() if prompt is not None else {}

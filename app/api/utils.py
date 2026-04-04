@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import datetime
 import logging
 import uuid
 from typing import Any
@@ -68,9 +69,24 @@ def internal_error_response(exc: Exception) -> JSONResponse:
 
 
 def serialize(obj: Any) -> Any:
-    """Convert ORM/Pydantic object(s) to JSON-compatible format."""
+    """Convert ORM/Pydantic object(s) to JSON-compatible format.
+
+    Supports: Pydantic models (model_dump), SQLAlchemy ORM models (__dict__),
+    sequences, and plain JSON-serializable values.
+    """
     if isinstance(obj, list):
         return [serialize(item) for item in obj]
     if hasattr(obj, "model_dump"):
         return obj.model_dump(mode="json")
+    # SQLAlchemy ORM model — convert via __dict__, filtering internal state
+    if hasattr(obj, "__table__"):
+        result: dict[str, Any] = {}
+        for key, value in obj.__dict__.items():
+            if key.startswith("_"):
+                continue
+            if isinstance(value, datetime.datetime):
+                result[key] = value.isoformat()
+            else:
+                result[key] = value
+        return result
     return obj

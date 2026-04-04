@@ -1,177 +1,177 @@
-# Спецификация: Сервис управления провайдерами (ProviderService)
+# Specification: Provider Management Service (ProviderService)
 
-> **Файл реализации:** `provider_service.py`  
-> **Слой:** Services / Use Cases  
-> **Ответственность:** Обёртка над ProviderRepository для CRUD-операций и проверки доступности провайдеров
-
----
-
-## 1. Общие правила
-
-- Сервис является обёрткой над `ProviderRepository` для управления провайдерами LLM.
-- Все методы — асинхронные.
-- Бизнес-логика проверки доступности (health-check) инкапсулирована в этом сервисе.
+> **Implementation file:** `provider_service.py`  
+> **Layer:** Services / Use Cases  
+> **Responsibility:** Wrapper over ProviderRepository for CRUD operations and provider health checks
 
 ---
 
-## 2. Класс: ProviderService
+## 1. General Rules
 
-### Зависимости (через конструктор)
+- The service is a wrapper over `ProviderRepository` for managing LLM providers.
+- All methods are asynchronous.
+- Health-check business logic is encapsulated in this service.
 
-| Параметр        | Тип                  | Описание                                        |
+---
+
+## 2. Class: ProviderService
+
+### Dependencies (via constructor)
+
+| Parameter       | Type                 | Description                                     |
 |-----------------|----------------------|-------------------------------------------------|
-| `provider_repo` | `ProviderRepository` | Репозиторий для CRUD-операций над провайдерами   |
+| `provider_repo` | `ProviderRepository` | Repository for CRUD operations on providers     |
 
 ---
 
-## 3. Метод: list_providers
+## 3. Method: list_providers
 
-### Назначение
+### Purpose
 
-Получение списка всех провайдеров.
+Retrieve the list of all providers.
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий один параметр: `only_active` (булево, по умолчанию True).
-- **Возвращает:** список провайдеров из репозитория.
+- **Async method** accepting one parameter: `only_active` (boolean, default True).
+- **Returns:** list of providers from the repository.
 
-### Алгоритм
+### Algorithm
 
-1. Вызвать `self.provider_repo.list_all(only_active=only_active)`.
-2. Вернуть результат.
-
----
-
-## 4. Метод: create_provider
-
-### Назначение
-
-Создание нового провайдера.
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий три параметра: `name` (строка), `api_key` (строка), `base_url` (строка).
-- **Возвращает:** созданный провайдер.
-
-### Алгоритм
-
-1. Вызвать `self.provider_repo.create(name=name, api_key=api_key, base_url=base_url)`.
-2. Вернуть результат.
+1. Call `self.provider_repo.list_all(only_active=only_active)`.
+2. Return the result.
 
 ---
 
-## 5. Метод: update_provider
+## 4. Method: create_provider
 
-### Назначение
+### Purpose
 
-Обновление провайдера (смена имени, ключа, URL).
+Create a new provider.
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий: `provider_id` (целое число), `name` (строка или None), `api_key` (строка или None), `base_url` (строка или None).
-- **Возвращает:** обновлённый провайдер или None.
+- **Async method** accepting three parameters: `name` (string), `api_key` (string), `base_url` (string).
+- **Returns:** the created provider.
 
-### Алгоритм
+### Algorithm
 
-1. Собрать словарь полей для обновления из переданных не-None параметров.
-2. Вызвать `self.provider_repo.update(provider_id, **fields)`.
-3. Вернуть результат.
-
----
-
-## 6. Метод: delete_provider
-
-### Назначение
-
-Soft delete провайдера.
-
-### Описание интерфейса
-
-- **Асинхронный метод**, принимающий один параметр: `provider_id` (целое число).
-- **Возвращает:** результат операции.
-
-### Алгоритм
-
-1. Вызвать `self.provider_repo.soft_delete(provider_id)`.
-2. Вернуть результат.
+1. Call `self.provider_repo.create(name=name, api_key=api_key, base_url=base_url)`.
+2. Return the result.
 
 ---
 
-## 7. Метод: check_health
+## 5. Method: update_provider
 
-### Назначение
+### Purpose
 
-Выполняет проверку доступности всех активных LLM-провайдеров. Для каждого провайдера отправляет лёгкий HTTP HEAD-запрос к его `base_url` и возвращает статус доступности.
+Update a provider (change name, key, URL).
 
-### Описание интерфейса
+### Interface Description
 
-- **Асинхронный метод**, принимающий один параметр: `http_client` (экземпляр httpx.AsyncClient). Передаётся как аргумент метода (а не через конструктор), чтобы не менять сигнатуру конструктора и не ломать существующие DI-фабрики и тесты.
-- **Возвращает:** список словарей (по одному на каждого активного провайдера).
+- **Async method** accepting: `provider_id` (integer), `name` (string or None), `api_key` (string or None), `base_url` (string or None).
+- **Returns:** updated provider or None.
 
-### Алгоритм
+### Algorithm
 
-1. Вызвать `self.provider_repo.list_all(only_active=True)` для получения списка активных провайдеров.
-2. **Параллельное выполнение**: для каждого провайдера создать асинхронную задачу проверки. Все задачи запустить параллельно с перехватом исключений. Установить общий таймаут на всю группу задач — 15 секунд. Если общий таймаут истёк — все незавершённые провайдеры получают статус "timeout".
-3. **Валидация SSRF**: перед выполнением HTTP-запроса к `base_url` провайдера — распарсить URL и проверить, что hostname НЕ является приватным IP-адресом. Запрещённые адреса: 127.0.0.1, ::1, диапазоны 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, а также 169.254.169.254 (AWS metadata endpoint). Проверка выполняется через DNS-резолвинг hostname (для защиты от DNS rebinding атак). Если `base_url` указывает на приватный IP — пропустить провайдера со статусом "error".
-4. Для каждого провайдера (в рамках параллельной задачи):
-   a. Попытаться выполнить HTTP HEAD-запрос к `provider.base_url` с таймаутом 5 секунд на отдельный запрос.
-   b. Если запрос успешен (любой HTTP-статус получен) — `status` = "healthy".
-   c. Если произошёл таймаут — `status` = "timeout".
-   d. Если произошла ошибка соединения — `status` = "unreachable".
-   e. Если произошла любая другая ошибка — `status` = "error".
-5. Сформировать словарь для каждого провайдера:
-   - `id` — целое число, ID провайдера.
-   - `name` — строка, имя провайдера.
-   - `base_url_masked` — строка, маскированный URL: только scheme и hostname (без path, query, fragment). Например, для "https://api.portkey.ai/v1/gateway" вернуть "https://api.portkey.ai". Полный `base_url` НЕ возвращается клиенту для предотвращения раскрытия внутренней инфраструктуры.
-   - `is_active` — булево значение (всегда true, т.к. фильтруем по активным).
-   - `status` — строка: "healthy", "timeout", "unreachable" или "error".
-   - `response_time_ms` — число с плавающей точкой или null. Время ответа в миллисекундах (только для status="healthy"). Для остальных статусов — null.
-6. Вернуть список словарей.
-
-### Логирование
-
-- При начале проверки — INFO: "Starting health check for N providers".
-- При ошибке конкретного провайдера — WARNING: имя провайдера, тип ошибки.
-- При обнаружении приватного IP в base_url — WARNING: имя провайдера, "Private IP detected in base_url".
-- При завершении — INFO: "Health check completed: N healthy, M unhealthy".
+1. Collect a dict of fields to update from provided non-None parameters.
+2. Call `self.provider_repo.update(provider_id, **fields)`.
+3. Return the result.
 
 ---
 
-## 8. Вспомогательная функция: _is_private_ip
+## 6. Method: delete_provider
 
-### Назначение
+### Purpose
 
-Проверка, является ли hostname приватным IP-адресом (SSRF-защита).
+Soft delete a provider.
 
-### Описание интерфейса
+### Interface Description
 
-- **Синхронная функция** на уровне модуля, принимающая один параметр: `hostname` (строка).
-- **Возвращает:** булево значение (True если IP приватный).
+- **Async method** accepting one parameter: `provider_id` (integer).
+- **Returns:** operation result.
 
-### Алгоритм
+### Algorithm
 
-1. Очистить hostname от квадратных скобок (для IPv6).
-2. Попытаться распарсить как литеральный IP-адрес. Если успешно — проверить, является ли он loopback, private, link-local или равен 169.254.169.254. Если да — вернуть True.
-3. Если это hostname (не IP) — выполнить DNS-резолвинг через socket.getaddrinfo и проверить ВСЕ полученные IP-адреса. Если хотя бы один является приватным — вернуть True. Это защищает от DNS rebinding атак.
-4. При ошибке DNS-резолвинга — вернуть False (провайдер будет проверен и получит статус "unreachable").
+1. Call `self.provider_repo.soft_delete(provider_id)`.
+2. Return the result.
 
 ---
 
-## 9. Безопасность
+## 7. Method: check_health
 
-- Перед каждым HTTP-запросом выполняется SSRF-валидация `base_url` (запрет приватных IP с DNS rebinding protection).
-- Поле `base_url` маскируется в ответе клиенту — возвращается только scheme и hostname.
-- API-ключ провайдера НЕ используется и НЕ раскрывается при health-check.
+### Purpose
+
+Performs a health check on all active LLM providers. For each provider, sends a lightweight HTTP HEAD request to its `base_url` and returns the availability status.
+
+### Interface Description
+
+- **Async method** accepting one parameter: `http_client` (httpx.AsyncClient instance). Passed as a method argument (not via constructor) to avoid changing the constructor signature and breaking existing DI factories and tests.
+- **Returns:** list of dicts (one per active provider).
+
+### Algorithm
+
+1. Call `self.provider_repo.list_all(only_active=True)` to get the list of active providers.
+2. **Parallel execution**: for each provider, create an async check task. Run all tasks in parallel with exception handling. Set a global timeout for the entire task group — 15 seconds. If the global timeout expires — all incomplete providers receive status "timeout".
+3. **SSRF validation**: before executing an HTTP request to the provider's `base_url` — parse the URL and verify that the hostname is NOT a private IP address. Prohibited addresses: 127.0.0.1, ::1, ranges 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16, and 169.254.169.254 (AWS metadata endpoint). Validation is performed via DNS resolution of the hostname (for DNS rebinding attack protection). If `base_url` points to a private IP — skip the provider with status "error".
+4. For each provider (within the parallel task):
+   a. Attempt an HTTP HEAD request to `provider.base_url` with a 5-second timeout per individual request.
+   b. If the request succeeds (any HTTP status received) — `status` = "healthy".
+   c. If a timeout occurs — `status` = "timeout".
+   d. If a connection error occurs — `status` = "unreachable".
+   e. If any other error occurs — `status` = "error".
+5. Build a dict for each provider:
+   - `id` — integer, provider ID.
+   - `name` — string, provider name.
+   - `base_url_masked` — string, masked URL: only scheme and hostname (no path, query, fragment). For example, for "https://api.portkey.ai/v1/gateway" return "https://api.portkey.ai". The full `base_url` is NOT returned to the client to prevent internal infrastructure disclosure.
+   - `is_active` — boolean (always true, since we filter by active).
+   - `status` — string: "healthy", "timeout", "unreachable", or "error".
+   - `response_time_ms` — float or null. Response time in milliseconds (only for status="healthy"). For other statuses — null.
+6. Return the list of dicts.
+
+### Logging
+
+- On check start — INFO: "Starting health check for N providers".
+- On individual provider error — WARNING: provider name, error type.
+- On private IP detected in base_url — WARNING: provider name, "Private IP detected in base_url".
+- On completion — INFO: "Health check completed: N healthy, M unhealthy".
 
 ---
 
-## 10. Обработка ошибок
+## 8. Helper Function: _is_private_ip
 
-| Ситуация                                | Действие                                              |
+### Purpose
+
+Check whether a hostname is a private IP address (SSRF protection).
+
+### Interface Description
+
+- **Synchronous module-level function** accepting one parameter: `hostname` (string).
+- **Returns:** boolean (True if IP is private).
+
+### Algorithm
+
+1. Strip square brackets from hostname (for IPv6).
+2. Attempt to parse as a literal IP address. If successful — check if it is loopback, private, link-local, or equals 169.254.169.254. If so — return True.
+3. If it is a hostname (not IP) — perform DNS resolution via socket.getaddrinfo and check ALL resolved IP addresses. If at least one is private — return True. This protects against DNS rebinding attacks.
+4. On DNS resolution error — return False (provider will be checked and receive "unreachable" status).
+
+---
+
+## 9. Security
+
+- SSRF validation of `base_url` is performed before every HTTP request (private IP prohibition with DNS rebinding protection).
+- The `base_url` field is masked in the client response — only scheme and hostname are returned.
+- The provider API key is NOT used and NOT disclosed during health checks.
+
+---
+
+## 10. Error Handling
+
+| Scenario                                | Action                                                |
 |-----------------------------------------|-------------------------------------------------------|
-| Ошибка получения списка провайдеров     | Пробрасывается наверх (обрабатывается роутером)       |
-| Таймаут HTTP-запроса к провайдеру       | status = "timeout", проверка остальных продолжается   |
-| Ошибка соединения с провайдером         | status = "unreachable", проверка остальных продолжается|
-| Приватный IP в base_url                 | status = "error", WARNING-лог                         |
-| Общий таймаут 15 секунд                 | Незавершённые провайдеры получают status = "timeout"   |
-| Любая другая ошибка HTTP-запроса        | status = "error", WARNING-лог                         |
+| Error fetching provider list            | Propagated upstream (handled by router)               |
+| HTTP request timeout to provider        | status = "timeout", remaining checks continue         |
+| Connection error with provider          | status = "unreachable", remaining checks continue     |
+| Private IP in base_url                  | status = "error", WARNING log                         |
+| Global 15-second timeout                | Incomplete providers receive status = "timeout"       |
+| Any other HTTP request error            | status = "error", WARNING log                         |

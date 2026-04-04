@@ -1,6 +1,6 @@
 """
-ProviderService — сервис управления провайдерами LLM.
-Обёртка над ProviderRepository для CRUD-операций.
+ProviderService — LLM provider management service.
+Wrapper over ProviderRepository for CRUD operations.
 """
 
 from __future__ import annotations
@@ -22,15 +22,13 @@ logger = logging.getLogger(__name__)
 
 
 class ProviderService:
-    """Сервис управления провайдерами — обёртка над ProviderRepository."""
+    """Provider management service — wrapper over ProviderRepository."""
 
     def __init__(self, provider_repo: ProviderRepository) -> None:
         self.provider_repo = provider_repo
 
-    async def list_providers(
-        self, only_active: bool = True
-    ) -> Sequence[ProviderModel]:
-        """Список всех провайдеров."""
+    async def list_providers(self, only_active: bool = True) -> Sequence[ProviderModel]:
+        """List all providers."""
         return await self.provider_repo.list_all(only_active=only_active)
 
     async def create_provider(
@@ -39,7 +37,7 @@ class ProviderService:
         api_key: str,
         base_url: str,
     ) -> ProviderModel:
-        """Создание нового провайдера."""
+        """Create a new provider."""
         return await self.provider_repo.create(
             name=name,
             api_key=api_key,
@@ -53,7 +51,7 @@ class ProviderService:
         api_key: str | None = None,
         base_url: str | None = None,
     ) -> ProviderModel | None:
-        """Обновление провайдера."""
+        """Update a provider."""
         fields: dict[str, Any] = {}
         if name is not None:
             fields["name"] = name
@@ -64,13 +62,17 @@ class ProviderService:
         return await self.provider_repo.update(provider_id, **fields)
 
     async def delete_provider(self, provider_id: int) -> bool:
-        """Soft delete провайдера."""
+        """Soft delete a provider."""
         return await self.provider_repo.soft_delete(provider_id)
+
+    async def toggle_active(self, provider_id: int) -> ProviderModel | None:
+        """Toggle is_active status of a provider."""
+        return await self.provider_repo.toggle_active(provider_id)
 
     async def check_health(
         self, http_client: httpx.AsyncClient
     ) -> list[dict[str, Any]]:
-        """Проверка доступности всех активных провайдеров (upgrade spec §1)."""
+        """Health check for all active providers (upgrade spec §1)."""
         providers = await self.provider_repo.list_all(only_active=True)
         logger.info("Starting health check for %d providers", len(providers))
 
@@ -80,7 +82,7 @@ class ProviderService:
             parsed = urlparse(provider.base_url)
             hostname = parsed.hostname or ""
 
-            # [RED-3] SSRF-валидация с DNS rebinding protection
+            # [RED-3] SSRF validation with DNS rebinding protection
             if _is_private_ip(hostname):
                 logger.warning(
                     "Private IP detected in base_url for provider %s",
