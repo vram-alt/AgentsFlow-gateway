@@ -1,20 +1,29 @@
 """
-PolicyService — сервис политик безопасности (Guardrails).
-Координирует CRUD между локальной БД и облаком провайдера.
+PolicyService — security policy (Guardrails) service.
+Coordinates CRUD between local DB and cloud provider.
 
-Спецификация: app/services/policy_service_spec.md
+Spec: app/services/policy_service_spec.md
 """
 
 from __future__ import annotations
 
+import logging
 import uuid
 from typing import Any
 
+from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
+from app.infrastructure.database.repositories import (
+    PolicyRepository,
+    ProviderRepository,
+)
+from app.services.log_service import LogService
+
+logger = logging.getLogger(__name__)
 
 
 def _make_error(error_code: str, message: str) -> GatewayError:
-    """Фабрика для создания GatewayError с автоматическим trace_id."""
+    """Factory for creating GatewayError with automatic trace_id."""
     return GatewayError(
         trace_id=str(uuid.uuid4()),
         error_code=error_code,
@@ -23,16 +32,17 @@ def _make_error(error_code: str, message: str) -> GatewayError:
 
 
 class PolicyService:
-    """Сервис управления политиками безопасности (Guardrails)."""
+    """Service for managing security policies (Guardrails)."""
 
     def __init__(
         self,
         *,
-        policy_repo: Any,
-        provider_repo: Any,
-        adapter: Any,
-        log_service: Any,
+        policy_repo: PolicyRepository,
+        provider_repo: ProviderRepository,
+        adapter: GatewayProvider,
+        log_service: LogService,
     ) -> None:
+        """[YEL-1] Concrete types instead of Any for dependency injection."""
         self.policy_repo = policy_repo
         self.provider_repo = provider_repo
         self.adapter = adapter
@@ -45,20 +55,20 @@ class PolicyService:
         body: dict[str, Any],
         provider_name: str = "portkey",
     ) -> Any:
-        """Создание политики: облако → БД → возврат Policy."""
-        # 1. Получить учётные данные провайдера
+        """Create policy: cloud -> DB -> return Policy."""
+        # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
-            return _make_error("AUTH_FAILED", "Провайдер не найден")
+            return _make_error("AUTH_FAILED", "Provider not found")
 
-        # 2. Отправить конфигурацию в облако
+        # 2. Send configuration to cloud
         cloud_result = await self.adapter.create_guardrail(
             body, provider.api_key, provider.base_url
         )
         if isinstance(cloud_result, GatewayError):
             return cloud_result
 
-        # 3. Сохранить в локальную БД
+        # 3. Save to local DB
         try:
             created = await self.policy_repo.create(
                 name=name,
@@ -66,10 +76,11 @@ class PolicyService:
                 remote_id=cloud_result["remote_id"],
                 provider_id=provider.id,
             )
-        except Exception:
-            return _make_error("UNKNOWN", "Ошибка при сохранении в БД")
+        except Exception as exc:
+            logger.error("Failed to save policy to DB: %s", exc)
+            return _make_error("UNKNOWN", "Database save error")
 
-        # 4. Вернуть доменную сущность
+        # 4. Return domain entity
         return created
 
     # ── 4. update_policy ─────────────────────────────────────────────
@@ -79,22 +90,25 @@ class PolicyService:
         name: str | None = None,
         body: dict[str, Any] | None = None,
     ) -> Any:
-        """Обновление политики: проверка → облако (если нужно) → БД."""
-        # 1. Найти политику в БД
+        """Update policy: check -> cloud (if needed) -> DB."""
+        # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
         if policy is None:
-            return _make_error("VALIDATION_ERROR", "Политика не найдена")
+            return _make_error("VALIDATION_ERROR", "Policy not found")
 
-        # 2. Если изменилось body и есть remote_id — синхронизация с облаком
+        # 2. If body changed and remote_id exists — sync with cloud
         if body is not None and policy.remote_id:
             provider = await self.provider_repo.get_active_by_name("portkey")
+            # [RED-2] Guard against None provider
+            if provider is None:
+                return _make_error("AUTH_FAILED", "Provider not found")
             cloud_result = await self.adapter.update_guardrail(
                 policy.remote_id, body, provider.api_key, provider.base_url
             )
             if isinstance(cloud_result, GatewayError):
                 return cloud_result
 
-        # 3. Обновить запись в БД
+        # 3. Update record in DB
         changed: dict[str, Any] = {}
         if name is not None:
             changed["name"] = name
@@ -103,53 +117,56 @@ class PolicyService:
 
         updated = await self.policy_repo.update(policy_id, **changed)
 
-        # 4. Вернуть обновлённую сущность
+        # 4. Return updated entity
         return updated
 
     # ── 5. delete_policy ─────────────────────────────────────────────
     async def delete_policy(self, policy_id: int) -> Any:
-        """Удаление политики: облако (если есть remote_id) → soft_delete в БД."""
-        # 1. Найти политику в БД
+        """Delete policy: cloud (if remote_id exists) -> soft_delete in DB."""
+        # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
         if policy is None:
-            return _make_error("VALIDATION_ERROR", "Политика не найдена")
+            return _make_error("VALIDATION_ERROR", "Policy not found")
 
-        # 2. Если есть remote_id — удалить в облаке
+        # 2. If remote_id exists — delete in cloud
         if policy.remote_id:
             provider = await self.provider_repo.get_active_by_name("portkey")
+            # [RED-2] Guard against None provider
+            if provider is None:
+                return _make_error("AUTH_FAILED", "Provider not found")
             cloud_result = await self.adapter.delete_guardrail(
                 policy.remote_id, provider.api_key, provider.base_url
             )
             if isinstance(cloud_result, GatewayError):
                 return cloud_result
 
-        # 3. Soft delete в БД
+        # 3. Soft delete in DB
         result = await self.policy_repo.soft_delete(policy_id)
 
-        # 4. Вернуть True
+        # 4. Return True
         return result
 
     # ── 6. list_policies ─────────────────────────────────────────────
     async def list_policies(self, only_active: bool = True) -> list[Any]:
-        """Получение списка политик из БД."""
+        """Get list of policies from DB."""
         return await self.policy_repo.list_all(only_active=only_active)
 
     # ── 7. sync_policies_from_provider ───────────────────────────────
     async def sync_policies_from_provider(self, provider_name: str = "portkey") -> Any:
-        """Синхронизация политик из облака провайдера в локальную БД."""
-        # 1. Получить учётные данные провайдера
+        """Sync policies from cloud provider to local DB."""
+        # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
-            return _make_error("AUTH_FAILED", "Провайдер не найден")
+            return _make_error("AUTH_FAILED", "Provider not found")
 
-        # 2. Запросить список политик из облака
+        # 2. Request policy list from cloud
         cloud_policies = await self.adapter.list_guardrails(
             provider.api_key, provider.base_url
         )
         if isinstance(cloud_policies, GatewayError):
             return cloud_policies
 
-        # 3. Для каждой политики из облака — синхронизировать
+        # 3. For each cloud policy — sync
         created = 0
         updated = 0
         unchanged = 0
@@ -161,7 +178,7 @@ class PolicyService:
                 )
 
                 if existing is None:
-                    # Создать новую запись
+                    # Create new record
                     await self.policy_repo.create(
                         name=remote_policy["name"],
                         body=remote_policy["config"],
@@ -170,7 +187,7 @@ class PolicyService:
                     )
                     created += 1
                 else:
-                    # Проверить, изменились ли данные (сравниваем только body)
+                    # Check if data changed (compare body only)
                     if existing.body != remote_policy["config"]:
                         await self.policy_repo.update(
                             existing.id if hasattr(existing, "id") else None,
@@ -180,11 +197,14 @@ class PolicyService:
                         updated += 1
                     else:
                         unchanged += 1
-            except Exception:
-                # [SRE_MARKER] Ошибка при синхронизации одной политики — пропустить
+            except Exception as exc:
+                # [SRE_MARKER] [YEL-4] Error syncing one policy — skip but log
+                logger.warning(
+                    "Error syncing policy %s: %s", remote_policy.get("remote_id"), exc
+                )
                 continue
 
-        # 4. Вернуть отчёт
+        # 4. Return report
         return {
             "created": created,
             "updated": updated,

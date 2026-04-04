@@ -1,5 +1,5 @@
 """
-Router: CRUD для политик безопасности (Guardrails) и синхронизация с облаком.
+Router: CRUD for security policies (Guardrails) and cloud sync.
 
 Spec: app/api/routes/policies_spec.md
 [SRE_MARKER] trace_id MUST always be present in error responses (JSONResponse).
@@ -8,7 +8,6 @@ Spec: app/api/routes/policies_spec.md
 
 from __future__ import annotations
 
-import uuid
 from typing import Any
 
 from fastapi import APIRouter, Depends
@@ -17,63 +16,19 @@ from fastapi.responses import JSONResponse
 from app.api.dependencies.di import get_policy_service
 from app.api.middleware.auth import get_current_user
 from app.api.schemas.policies import (
-    ErrorResponse,
     PolicyCreateRequest,
     PolicyUpdateRequest,
     SyncRequest,
 )
-from app.domain.dto.gateway_error import GatewayError
-from app.domain.entities.policy import Policy as PolicyEntity
+from app.api.utils import (
+    gateway_error_response,
+    internal_error_response,
+    is_gateway_error,
+    serialize,
+)
 from app.services.policy_service import PolicyService
 
 router = APIRouter(prefix="/api/policies", tags=["Policies"])
-
-
-def _is_gateway_error(result: object) -> bool:
-    """Check if result is a GatewayError (real or mock with spec)."""
-    return isinstance(result, GatewayError) or (
-        hasattr(result, "status_code")
-        and hasattr(result, "error_code")
-        and hasattr(result, "trace_id")
-        and hasattr(result, "message")
-        and hasattr(result, "details")
-        and not isinstance(result, dict)
-    )
-
-
-def _error_response(result: object) -> JSONResponse:
-    """Build JSONResponse from a GatewayError-like object."""
-    error_body = ErrorResponse(
-        trace_id=result.trace_id,  # type: ignore[attr-defined]
-        error_code=result.error_code,  # type: ignore[attr-defined]
-        message=result.message,  # type: ignore[attr-defined]
-        details=result.details if result.details else {},  # type: ignore[attr-defined]
-    )
-    return JSONResponse(
-        status_code=result.status_code,  # type: ignore[attr-defined]
-        content=error_body.model_dump(),
-    )
-
-
-def _internal_error_response(exc: Exception) -> JSONResponse:
-    """[SRE] Build HTTP 500 JSONResponse for unhandled exceptions."""
-    error_body = ErrorResponse(
-        trace_id=str(uuid.uuid4()),
-        error_code="INTERNAL_ERROR",
-        message=str(exc),
-    )
-    return JSONResponse(status_code=500, content=error_body.model_dump())
-
-
-def _serialize(obj: Any) -> Any:
-    """Конвертирует ORM/Pydantic-объект(ы) в JSON-совместимый формат."""
-    if isinstance(obj, list):
-        return [_serialize(item) for item in obj]
-    if isinstance(obj, PolicyEntity):
-        return obj.model_dump(mode="json")
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(mode="json")
-    return obj
 
 
 # ── GET /api/policies/ ───────────────────────────────────────────────
@@ -82,16 +37,16 @@ async def list_policies(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Список всех активных политик."""
+    """List all active policies."""
     try:
         result = await policy_service.list_policies()
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=200, content=_serialize(result))
+    return JSONResponse(status_code=200, content=serialize(result))
 
 
 # ── POST /api/policies/ ─────────────────────────────────────────────
@@ -101,7 +56,7 @@ async def create_policy(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Создание новой политики."""
+    """Create a new policy."""
     try:
         result = await policy_service.create_policy(
             name=body.name,
@@ -109,12 +64,12 @@ async def create_policy(
             provider_name=body.provider_name,
         )
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=201, content=_serialize(result))
+    return JSONResponse(status_code=201, content=serialize(result))
 
 
 # ── POST /api/policies/sync — MUST be BEFORE /{policy_id} ───────────
@@ -124,18 +79,18 @@ async def sync_policies(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Синхронизация политик из облака провайдера."""
+    """Sync policies from cloud provider."""
     try:
         result = await policy_service.sync_policies_from_provider(
             provider_name=body.provider_name,
         )
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=200, content=_serialize(result))
+    return JSONResponse(status_code=200, content=serialize(result))
 
 
 # ── PUT /api/policies/{policy_id} ───────────────────────────────────
@@ -146,7 +101,7 @@ async def update_policy(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Обновление политики."""
+    """Update a policy."""
     try:
         result = await policy_service.update_policy(
             policy_id=policy_id,
@@ -154,12 +109,12 @@ async def update_policy(
             body=body.body,
         )
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=200, content=_serialize(result))
+    return JSONResponse(status_code=200, content=serialize(result))
 
 
 # ── DELETE /api/policies/{policy_id} ─────────────────────────────────
@@ -169,13 +124,13 @@ async def delete_policy(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Soft delete политики."""
+    """Soft delete a policy."""
     try:
         result = await policy_service.delete_policy(policy_id=policy_id)
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
     return JSONResponse(status_code=200, content={"status": "deleted"})

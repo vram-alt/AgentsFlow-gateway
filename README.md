@@ -33,6 +33,25 @@ uvicorn app.main:app --reload
 | ORM             | SQLAlchemy Async + aiosqlite      |
 | Валидация       | Pydantic V2                       |
 
+## Известные ограничения (POC)
+
+### [RED-2] In-memory Rate Limiter — не работает в multi-worker среде
+
+Текущая реализация rate limiter для защиты от brute-force атак использует
+in-memory `dict` внутри каждого процесса. В multi-worker развёртывании
+(например, `gunicorn -w 4 -k uvicorn.workers.UvicornWorker`) каждый воркер
+поддерживает собственный независимый счётчик неудачных попыток.
+
+**Последствия:** атакующий может распределить попытки между воркерами и
+обойти лимит (вместо 5 попыток получит `5 × N_workers`).
+
+**Рекомендация для продакшена:** заменить на Redis-backed sliding window
+rate limiter (например, через `redis-py` + Lua-скрипт или библиотеку
+`fastapi-limiter`).
+
+Для текущего POC с одним воркером (`uvicorn --workers 1`) это ограничение
+не является критичным.
+
 ## Лицензия
 
 Proprietary — Phase 3 POC.

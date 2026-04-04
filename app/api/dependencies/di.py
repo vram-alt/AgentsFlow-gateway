@@ -24,10 +24,13 @@ try:
     import app.infrastructure.database.session as _session_mod  # noqa: F401
 
     from app.infrastructure.database.session import get_db_session
-except (ValueError, RuntimeError, Exception):
-    # Если session.py не удалось импортировать (невалидный .env),
-    # создаём stub-модуль в sys.modules, чтобы unittest.mock.patch
-    # мог разрешить путь "app.infrastructure.database.session.get_settings".
+except (ValueError, RuntimeError, TypeError):
+    # [RED-4] Narrowed from `except Exception` to specific expected errors:
+    #   - ValueError: invalid DATABASE_URL configuration
+    #   - RuntimeError: missing runtime dependencies
+    #   - TypeError: SQLAlchemy engine kwargs mismatch (e.g. pool_size with SQLite/NullPool)
+    # Critical errors like ImportError, SyntaxError, ModuleNotFoundError will now
+    # propagate immediately instead of being silently swallowed.
     _mod_name = "app.infrastructure.database.session"
     if _mod_name not in _sys.modules:
         _stub = _types.ModuleType(_mod_name)
@@ -40,6 +43,9 @@ except (ValueError, RuntimeError, Exception):
         yield None  # type: ignore[misc]
 
 
+import httpx
+from fastapi import HTTPException
+
 from app.domain.contracts.gateway_provider import GatewayProvider
 from app.infrastructure.adapters.portkey_adapter import PortkeyAdapter
 from app.infrastructure.database.repositories import (
@@ -51,10 +57,14 @@ from app.services.chat_service import ChatService
 from app.services.log_service import LogService
 from app.services.policy_service import PolicyService
 from app.services.provider_service import ProviderService
+from app.services.tester_service import TesterService
 from app.services.webhook_service import WebhookService
 
 # ── Синглтон адаптера (stateless, §2.4) ──────────────────────────────
 _adapter_instance: PortkeyAdapter | None = None
+
+# ── Синглтон изолированного HTTP-клиента для TesterService (§4) ──────
+_tester_http_client: httpx.AsyncClient | None = None
 
 
 def _validate_database_url() -> None:
@@ -252,3 +262,69 @@ def get_provider_service(
     if not isinstance(provider_repo, ProviderRepository):
         provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
     return ProviderService(provider_repo=provider_repo)
+
+
+# ======================================================================
+# [UPGRADE] §3 — get_http_client (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+def get_http_client() -> httpx.AsyncClient:
+    """Предоставляет переиспользуемый httpx.AsyncClient из адаптера.
+
+    [SRE_MARKER] Если адаптер None → HTTP 503 'Service not ready'.
+    """
+    adapter = get_adapter()
+    if adapter is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    return adapter.get_http_client()
+
+
+# ======================================================================
+# [UPGRADE] §4 — get_tester_http_client (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+def get_tester_http_client() -> httpx.AsyncClient:
+    """Предоставляет изолированный httpx.AsyncClient для TesterService.
+
+    [SRE_MARKER] Изолированный пул соединений для предотвращения каскадных отказов.
+    Если адаптер None → HTTP 503 'Service not ready'.
+    """
+    global _tester_http_client
+    adapter = get_adapter()
+    if adapter is None:
+        raise HTTPException(status_code=503, detail="Service not ready")
+    if _tester_http_client is None:
+        try:
+            from app.config import get_settings
+
+            timeout = get_settings().external_http_timeout
+        except Exception:
+            timeout = 30
+        _tester_http_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(timeout),
+            limits=httpx.Limits(max_connections=10),
+        )
+    return _tester_http_client
+
+
+# ======================================================================
+# [UPGRADE] §1 — get_tester_service (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+def get_tester_service(
+    provider_repo: ProviderRepository = Depends(get_provider_repo),
+    http_client: httpx.AsyncClient = Depends(get_tester_http_client),
+) -> TesterService:
+    """Создаёт TesterService с ProviderRepository и httpx.AsyncClient.
+
+    Спека upgrade §1: зависимости — ProviderRepository (из get_provider_repo),
+    httpx.AsyncClient (из get_tester_http_client).
+    """
+    if not isinstance(provider_repo, ProviderRepository):
+        provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
+    if not isinstance(http_client, httpx.AsyncClient):
+        http_client = get_tester_http_client()
+    return TesterService(provider_repo=provider_repo, http_client=http_client)

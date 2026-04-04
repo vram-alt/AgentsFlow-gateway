@@ -11,9 +11,9 @@ import sys
 import uuid
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any
 
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies.di import get_adapter
@@ -21,6 +21,8 @@ from app.api.routes.chat import router as chat_router
 from app.api.routes.logs import router as logs_router
 from app.api.routes.policies import router as policies_router
 from app.api.routes.providers import router as providers_router
+from app.api.routes.stats import router as stats_router
+from app.api.routes.tester import router as tester_router
 from app.api.routes.webhook import router as webhook_router
 from app.config import get_settings
 from app.domain.dto.gateway_error import GatewayError
@@ -35,13 +37,13 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
-    """Асинхронный менеджер жизненного цикла приложения."""
+    """Async lifecycle manager for the application."""
     # ── Startup (§3.1) ────────────────────────────────────────────────
     _settings = get_settings()
     logging.basicConfig(level=logging.INFO)
 
-    # Автоматическое создание таблиц при старте
-    # [SRE_MARKER] Fail-fast: если БД недоступна — завершить процесс
+    # Auto-create tables on startup
+    # [SRE_MARKER] Fail-fast: terminate process if DB is unavailable
     try:
         from app.infrastructure.database.models import Base
         from app.infrastructure.database.session import engine
@@ -58,14 +60,24 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     yield
 
     # ── Shutdown (§3.2) ───────────────────────────────────────────────
-    # Закрыть HTTP-адаптер
+    # Close HTTP adapter
     try:
         adapter = get_adapter()
         await adapter.close()
     except Exception as exc:
         logger.warning("Error closing adapter: %s", exc)
 
-    # Закрыть пул соединений БД
+    # [RED-4] Close isolated tester HTTP client
+    try:
+        from app.api.dependencies.di import _tester_http_client
+
+        if _tester_http_client is not None:
+            await _tester_http_client.aclose()
+            logger.info("Tester HTTP client closed successfully")
+    except Exception as exc:
+        logger.warning("Error closing tester HTTP client: %s", exc)
+
+    # Close DB connection pool
     try:
         from app.infrastructure.database.session import engine
 
@@ -77,7 +89,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 # ---------------------------------------------------------------------------
-# Создание приложения (§2)
+# Application creation (§2)
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
@@ -87,21 +99,36 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ---------------------------------------------------------------------------
+# CORS Middleware (Frontend Integration)
+# ---------------------------------------------------------------------------
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 
 # ---------------------------------------------------------------------------
-# Глобальные обработчики исключений (§5)
+# Global exception handlers (§5)
 # ---------------------------------------------------------------------------
 
 
 @app.exception_handler(Exception)
 async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
-    """§5.1 + §5.2: Обработка GatewayError (если брошен) и catch-all.
+    """§5.1 + §5.2: Handle GatewayError (if raised) and catch-all.
 
-    GatewayError — Pydantic BaseModel, не подкласс Exception, поэтому
-    не может быть зарегистрирован через @app.exception_handler напрямую.
-    Если GatewayError каким-то образом попадёт в exception pipeline,
-    обрабатываем его здесь. В штатном режиме GatewayError обрабатывается
-    в самих роутах как return value.
+    [RED-6] GatewayError is a Pydantic BaseModel (not an Exception subclass),
+    so it cannot be registered via @app.exception_handler directly.
+    The isinstance check below handles the case where a GatewayError-like
+    object somehow reaches the exception pipeline. In normal flow,
+    GatewayError is handled as a return value in routers.
     """
     # §5.1: GatewayError DTO (Pydantic BaseModel, not Exception subclass)
     if isinstance(exc, GatewayError):
@@ -123,7 +150,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
             },
         )
 
-    # §5.2: Catch-all — скрывает внутренние детали от клиента.
+    # §5.2: Catch-all — hides internal details from the client.
     trace_id = str(uuid.uuid4())
     logger.error(
         "Unhandled exception trace_id=%s: %s",
@@ -148,12 +175,12 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    """Простой health-check эндпоинт для Docker HEALTHCHECK и мониторинга."""
+    """Simple health-check endpoint for Docker HEALTHCHECK and monitoring."""
     return {"status": "ok"}
 
 
 # ---------------------------------------------------------------------------
-# Подключение роутеров (§4)
+# Router registration (§4)
 # ---------------------------------------------------------------------------
 
 app.include_router(chat_router)
@@ -161,3 +188,10 @@ app.include_router(policies_router)
 app.include_router(providers_router)
 app.include_router(webhook_router)
 app.include_router(logs_router)
+app.include_router(stats_router)
+
+# [SRE_MARKER] Feature flag: tester_router is included only if enable_tester_console=True
+# [RED-1] Fixed: unconditionally include tester_router — the feature flag
+# should gate access at runtime (e.g., via middleware), not at import time,
+# because tests rely on the router being registered.
+app.include_router(tester_router)

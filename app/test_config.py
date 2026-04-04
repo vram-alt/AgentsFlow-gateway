@@ -437,3 +437,50 @@ class TestGetSettings:
         get_settings.cache_clear()
         second = get_settings()
         assert first is not second
+
+
+# =========================================================================
+# 11. [UPGRADE] Feature flag: enable_tester_console (main_upgrade_spec §2)
+# =========================================================================
+
+
+class TestEnableTesterConsole:
+    """Тесты для нового поля enable_tester_console.
+
+    main_upgrade_spec.md §2: tester_router подключается условно,
+    только если settings.enable_tester_console == True.
+    По умолчанию False (production).
+    """
+
+    def test_enable_tester_console_default_is_false(
+        self, valid_env: dict[str, str]
+    ) -> None:
+        """enable_tester_console по умолчанию = False (production-safe)."""
+        settings = Settings(_env_file=None)
+        assert hasattr(settings, "enable_tester_console"), (
+            "Settings должен иметь поле enable_tester_console"
+        )
+        assert settings.enable_tester_console is False
+
+    def test_enable_tester_console_true_from_env(
+        self, monkeypatch: pytest.MonkeyPatch, valid_env: dict[str, str]
+    ) -> None:
+        """enable_tester_console=true из окружения → True."""
+        monkeypatch.setenv("ENABLE_TESTER_CONSOLE", "true")
+        settings = Settings(_env_file=None)
+        assert settings.enable_tester_console is True
+
+    def test_enable_tester_console_false_from_env(
+        self, monkeypatch: pytest.MonkeyPatch, valid_env: dict[str, str]
+    ) -> None:
+        """enable_tester_console=false из окружения → False."""
+        monkeypatch.setenv("ENABLE_TESTER_CONSOLE", "false")
+        settings = Settings(_env_file=None)
+        assert settings.enable_tester_console is False
+
+    def test_enable_tester_console_is_bool_type(
+        self, valid_env: dict[str, str]
+    ) -> None:
+        """Тип enable_tester_console — bool."""
+        settings = Settings(_env_file=None)
+        assert isinstance(settings.enable_tester_console, bool)

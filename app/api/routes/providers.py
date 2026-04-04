@@ -1,5 +1,5 @@
 """
-Router: CRUD для провайдеров LLM.
+Router: CRUD for LLM providers.
 
 Spec: app/api/routes/providers_spec.md
 [SRE_MARKER] trace_id MUST always be present in error responses (JSONResponse).
@@ -7,70 +7,67 @@ Spec: app/api/routes/providers_spec.md
 
 from __future__ import annotations
 
-import uuid
+import time
 from typing import Any
 
+import httpx
 from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 
-from app.api.dependencies.di import get_provider_service
+from app.api.dependencies.di import get_http_client, get_provider_service
 from app.api.middleware.auth import get_current_user
 from app.api.schemas.providers import (
-    ErrorResponse,
     ProviderCreateRequest,
     ProviderUpdateRequest,
 )
-from app.domain.dto.gateway_error import GatewayError
-from app.domain.entities.provider import Provider as ProviderEntity
+from app.api.utils import (
+    gateway_error_response,
+    internal_error_response,
+    is_gateway_error,
+    serialize,
+)
 
 router = APIRouter(prefix="/api/providers", tags=["Providers"])
 
 
-def _is_gateway_error(result: object) -> bool:
-    """Check if result is a GatewayError (real or mock with spec)."""
-    return isinstance(result, GatewayError) or (
-        hasattr(result, "status_code")
-        and hasattr(result, "error_code")
-        and hasattr(result, "trace_id")
-        and hasattr(result, "message")
-        and hasattr(result, "details")
-        and not isinstance(result, dict)
-    )
+# ── Кэш для health-check (upgrade spec §1.4 п.2) ────────────────────
+_health_cache: dict[str, Any] = {}
+_health_cache_timestamp: float = 0.0
+_health_cache_service_id: int | None = None
+_HEALTH_CACHE_TTL: float = 30.0
 
 
-def _error_response(result: object) -> JSONResponse:
-    """Build JSONResponse from a GatewayError-like object."""
-    error_body = ErrorResponse(
-        trace_id=result.trace_id,  # type: ignore[attr-defined]
-        error_code=result.error_code,  # type: ignore[attr-defined]
-        message=result.message,  # type: ignore[attr-defined]
-        details=result.details if result.details else {},  # type: ignore[attr-defined]
-    )
-    return JSONResponse(
-        status_code=result.status_code,  # type: ignore[attr-defined]
-        content=error_body.model_dump(),
-    )
+# ── GET /api/providers/health ────────────────────────────────────────
+# MUST be registered BEFORE /{provider_id} (upgrade spec §1.7)
+@router.get("/health")
+async def get_providers_health(
+    provider_service: Any = Depends(get_provider_service),
+    http_client: httpx.AsyncClient = Depends(get_http_client),
+    _current_user: str = Depends(get_current_user),
+) -> Any:
+    """GET /api/providers/health — provider availability status."""
+    global _health_cache, _health_cache_timestamp, _health_cache_service_id
 
+    # Reset cache if service changed (for tests)
+    svc_id = id(provider_service)
+    if _health_cache_service_id is not None and _health_cache_service_id != svc_id:
+        _health_cache = {}
+        _health_cache_timestamp = 0.0
+    _health_cache_service_id = svc_id
 
-def _internal_error_response(exc: Exception) -> JSONResponse:
-    """[SRE] Build HTTP 500 JSONResponse for unhandled exceptions."""
-    error_body = ErrorResponse(
-        trace_id=str(uuid.uuid4()),
-        error_code="INTERNAL_ERROR",
-        message=str(exc),
-    )
-    return JSONResponse(status_code=500, content=error_body.model_dump())
+    now = time.monotonic()
+    if _health_cache and (now - _health_cache_timestamp) < _HEALTH_CACHE_TTL:
+        return _health_cache.get("result", [])
 
+    try:
+        result = await provider_service.check_health(http_client)
+    except Exception as exc:
+        return internal_error_response(exc)
 
-def _serialize(obj: Any) -> Any:
-    """Конвертирует ORM/Pydantic-объект(ы) в JSON-совместимый формат."""
-    if isinstance(obj, list):
-        return [_serialize(item) for item in obj]
-    if isinstance(obj, ProviderEntity):
-        return obj.model_dump(mode="json")
-    if hasattr(obj, "model_dump"):
-        return obj.model_dump(mode="json")
-    return obj
+    _health_cache = {"result": result}
+    _health_cache_timestamp = time.monotonic()
+
+    return result
 
 
 # ── GET /api/providers/ ──────────────────────────────────────────────
@@ -79,16 +76,16 @@ async def list_providers(
     provider_service: Any = Depends(get_provider_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Список всех провайдеров."""
+    """List all providers."""
     try:
         result = await provider_service.list_providers()
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=200, content=_serialize(result))
+    return JSONResponse(status_code=200, content=serialize(result))
 
 
 # ── POST /api/providers/ ─────────────────────────────────────────────
@@ -98,7 +95,7 @@ async def create_provider(
     provider_service: Any = Depends(get_provider_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Создание нового провайдера."""
+    """Create a new provider."""
     try:
         result = await provider_service.create_provider(
             name=body.name,
@@ -106,12 +103,12 @@ async def create_provider(
             base_url=body.base_url,
         )
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=201, content=_serialize(result))
+    return JSONResponse(status_code=201, content=serialize(result))
 
 
 # ── PUT /api/providers/{provider_id} ─────────────────────────────────
@@ -122,7 +119,7 @@ async def update_provider(
     provider_service: Any = Depends(get_provider_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Обновление провайдера."""
+    """Update a provider."""
     try:
         result = await provider_service.update_provider(
             provider_id=provider_id,
@@ -131,12 +128,12 @@ async def update_provider(
             base_url=body.base_url,
         )
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
-    return JSONResponse(status_code=200, content=_serialize(result))
+    return JSONResponse(status_code=200, content=serialize(result))
 
 
 # ── DELETE /api/providers/{provider_id} ───────────────────────────────
@@ -146,13 +143,13 @@ async def delete_provider(
     provider_service: Any = Depends(get_provider_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """Soft delete провайдера."""
+    """Soft delete a provider."""
     try:
         result = await provider_service.delete_provider(provider_id=provider_id)
     except Exception as exc:
-        return _internal_error_response(exc)
+        return internal_error_response(exc)
 
-    if _is_gateway_error(result):
-        return _error_response(result)
+    if is_gateway_error(result):
+        return gateway_error_response(result)
 
     return JSONResponse(status_code=200, content={"status": "deleted"})

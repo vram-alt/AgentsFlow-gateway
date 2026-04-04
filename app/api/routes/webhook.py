@@ -9,9 +9,9 @@ from __future__ import annotations
 import hmac
 import json
 import logging
-from typing import Any, Dict
+from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from app.config import get_settings
 from app.api.dependencies.di import get_webhook_service
@@ -46,7 +46,7 @@ def _check_nesting_depth(obj: Any, current_depth: int = 0) -> int:
 async def receive_webhook(
     request: Request,
     webhook_service: WebhookService = Depends(get_webhook_service),
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     POST /api/webhook — receive incoming webhook reports.
 
@@ -56,13 +56,14 @@ async def receive_webhook(
     3. Parse JSON body (422).
     4. Check nesting depth (422).
     5. Call service, return result (200).
-    [SRE_MARKER] Service error/rejected status → still HTTP 200.
-    [SRE_MARKER] RuntimeError → HTTP 500.
+    [SRE_MARKER] Service error/rejected status -> still HTTP 200.
+    [SRE_MARKER] RuntimeError -> HTTP 500.
     """
     settings = get_settings()
 
     # --- 1. Auth: X-Webhook-Secret ---
     # [SRE_MARKER] Timing-safe comparison via hmac.compare_digest
+    # [RED-3] Uses the same hmac.compare_digest pattern as middleware auth
     secret = request.headers.get("x-webhook-secret")
     if not secret or not hmac.compare_digest(
         secret.encode("utf-8"),
@@ -104,12 +105,12 @@ async def receive_webhook(
         )
 
     # --- 5. Call service ---
-    # [SRE_MARKER] RuntimeError → HTTP 500
+    # [SRE_MARKER] RuntimeError -> HTTP 500
     try:
         result = await webhook_service.process_guardrail_incident(payload)
     except RuntimeError as exc:
         logger.error("RuntimeError in webhook service: %s", exc)
         raise HTTPException(status_code=500, detail="Internal Server Error") from exc
 
-    # [SRE_MARKER] Service error/rejected status → still HTTP 200
+    # [SRE_MARKER] Service error/rejected status -> still HTTP 200
     return result

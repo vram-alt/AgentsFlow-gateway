@@ -44,6 +44,12 @@
 1. Закрыть пул соединений БД: `engine.dispose()`.
 2. Логировать: `"AI Gateway shut down"`.
 
+### 3.3. Порядок инициализации (Startup Order)
+
+Роутеры `stats_router` и `tester_router` зависят от DI-фабрик `get_log_service`, `get_tester_service`, `get_http_client`. Все эти фабрики требуют, чтобы `PortkeyAdapter` был инициализирован в lifespan startup. FastAPI гарантирует завершение lifespan startup до приёма запросов, однако:
+- Необходимо добавить smoke-тест, проверяющий, что после запуска приложения вызов `get_http_client()` не возвращает ошибку.
+- Если lifespan startup завершился с ошибкой (адаптер не инициализирован), приложение НЕ должно принимать запросы.
+
 ---
 
 ## 4. Подключение роутеров
@@ -52,19 +58,23 @@
 
 **API-роуты (с префиксом `/api/`):**
 
-| Роутер             | Префикс           | Теги          |
-|--------------------|--------------------|---------------|
-| chat_router        | `/api/chat`        | Chat          |
-| policies_router    | `/api/policies`    | Policies      |
-| webhook_router     | `/api/webhook`     | Webhook       |
-| logs_router        | `/api/logs`        | Logs          |
-| providers_router   | `/api/providers`   | Providers     |
+| Роутер             | Префикс           | Теги          | Условие подключения         |
+|--------------------|--------------------|---------------|-----------------------------|
+| chat_router        | `/api/chat`        | Chat          | Безусловно                  |
+| policies_router    | `/api/policies`    | Policies      | Безусловно                  |
+| webhook_router     | `/api/webhook`     | Webhook       | Безусловно                  |
+| logs_router        | `/api/logs`        | Logs          | Безусловно                  |
+| providers_router   | `/api/providers`   | Providers     | Безусловно                  |
+| stats_router       | (определён в роутере) | Stats      | Безусловно                  |
+| tester_router      | (определён в роутере) | Tester     | Только если `settings.enable_tester_console` = True |
 
 **UI-роуты (без префикса):**
 
 | Роутер             | Префикс | Теги |
 |--------------------|---------|------|
 | ui_pages_router    | `/`     | UI   |
+
+**Порядок подключения:** chat, policies, providers, webhook, logs, stats, tester (условно).
 
 ---
 
@@ -98,7 +108,16 @@ FastAPI обрабатывает автоматически → HTTP 422.
 
 ---
 
-## 6. Обработка ошибок
+## 6. Безопасность (Attack Surface)
+
+Подключение роутеров добавляет эндпоинты, включая прокси к внешним API (`/api/tester/proxy`) и экспорт данных (`/api/logs/export`). Требования:
+- Все эндпоинты ДОЛЖНЫ иметь security-схему в OpenAPI-документации (HTTP Basic Auth).
+- Все эндпоинты ДОЛЖНЫ иметь явную пометку `deprecated=False` в OpenAPI.
+- Роутер `tester_router` ДОЛЖЕН быть отключаемым через feature flag `settings.enable_tester_console` (по умолчанию False в production).
+
+---
+
+## 7. Обработка ошибок
 
 | Ситуация                        | Действие                                          |
 |---------------------------------|---------------------------------------------------|

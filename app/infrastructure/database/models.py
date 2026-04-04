@@ -2,13 +2,13 @@
 ORM-модели SQLAlchemy 2.0+ для AI Gateway.
 
 Таблицы: providers, policies, logs.
-Шифрование api_key через Fernet (TypeDecorator).
+Шифрование api_key через Fernet (String subclass with TypeDecorator-style methods).
 """
 
 from __future__ import annotations
 
 import datetime
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from cryptography.fernet import Fernet
 from sqlalchemy import (
@@ -38,64 +38,68 @@ class Base(DeclarativeBase):
 
 
 # ---------------------------------------------------------------------------
-# TypeDecorator для прозрачного шифрования/дешифрования через Fernet
+# [YEL-5] EncryptedString — String subclass with TypeDecorator-style API
 # ---------------------------------------------------------------------------
 class EncryptedString(String):
-    """
-    Хранит строку в зашифрованном виде (Fernet).
+    """[YEL-5] Transparent Fernet encryption via String subclass.
 
-    Наследуется от String, чтобы isinstance(col.type, String) == True.
-    process_bind_param  — шифрует перед записью в БД.
-    process_result_value — расшифровывает при чтении из БД.
+    Inherits from String so isinstance(col.type, String) == True.
+    Uses process_bind_param / process_result_value (TypeDecorator pattern)
+    as the single source of truth for encryption/decryption logic.
+    bind_processor / result_processor delegate to these methods,
+    eliminating the previous code duplication.
 
-    Fernet-объект создаётся лениво при каждом вызове, чтобы
-    позволить патчить get_settings() для тестов.
+    Fernet object is created lazily on each call to allow
+    patching get_settings() in tests.
     """
 
     cache_ok = True
 
     def _get_fernet(self) -> Fernet:
-        """Возвращает Fernet-экземпляр на основе текущего encryption_key."""
+        """Return a Fernet instance based on the current encryption_key."""
         key = get_settings().encryption_key
         return Fernet(key.encode())
 
-    def bind_processor(self, dialect):
-        """Возвращает функцию шифрования для записи в БД."""
-
-        def process(value):
-            if value is None:
-                return value
-            return self._get_fernet().encrypt(value.encode()).decode()
-
-        return process
-
-    def result_processor(self, dialect, coltype):
-        """Возвращает функцию расшифровки при чтении из БД."""
-
-        def process(value):
-            if value is None:
-                return value
-            return self._get_fernet().decrypt(value.encode()).decode()
-
-        return process
-
-    def process_bind_param(self, value, dialect):
-        """Шифрует значение перед записью (для прямого вызова в тестах)."""
+    def process_bind_param(self, value: str | None, dialect: Any) -> str | None:
+        """Encrypt value before writing to DB (single source of truth)."""
         if value is None:
             return value
         return self._get_fernet().encrypt(value.encode()).decode()
 
-    def process_result_value(self, value, dialect):
-        """Расшифровывает значение при чтении (для прямого вызова в тестах)."""
+    def process_result_value(self, value: str | None, dialect: Any) -> str | None:
+        """Decrypt value when reading from DB (single source of truth)."""
         if value is None:
             return value
         return self._get_fernet().decrypt(value.encode()).decode()
+
+    def bind_processor(self, dialect: Any) -> Any:
+        """Return encryption function for DB writes.
+
+        Delegates to process_bind_param to avoid duplication.
+        """
+
+        def process(value: str | None) -> str | None:
+            return self.process_bind_param(value, dialect)
+
+        return process
+
+    def result_processor(self, dialect: Any, coltype: Any) -> Any:
+        """Return decryption function for DB reads.
+
+        Delegates to process_result_value to avoid duplication.
+        """
+
+        def process(value: str | None) -> str | None:
+            return self.process_result_value(value, dialect)
+
+        return process
 
 
 # ---------------------------------------------------------------------------
 # Утилита: текущее UTC-время
 # ---------------------------------------------------------------------------
 def _utcnow() -> datetime.datetime:
+    """Return current UTC datetime."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 

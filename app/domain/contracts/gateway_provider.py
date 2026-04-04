@@ -5,6 +5,8 @@ from __future__ import annotations
 import abc
 from typing import Union
 
+import httpx
+
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.dto.unified_prompt import UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse
@@ -47,3 +49,22 @@ class GatewayProvider(abc.ABC):
         self, api_key: str, base_url: str
     ) -> Union[list[dict], GatewayError]:
         """Получение списка всех политик безопасности от провайдера."""
+
+    # [GRN] Non-abstract methods with default implementations.
+    # Concrete adapters SHOULD override these for proper resource management.
+    # Not abstract to preserve backward compatibility with existing adapters.
+
+    async def close(self) -> None:
+        """Корректно закрывает переиспользуемый HTTP-клиент.
+
+        Must be called during application shutdown to release resources.
+        Default: no-op. Adapters with persistent connections should override.
+        """
+
+    def get_http_client(self) -> httpx.AsyncClient:
+        """Возвращает переиспользуемый httpx.AsyncClient.
+
+        Used by DI layer to share the HTTP client with other components.
+        Default: creates a new client. Adapters should override for reuse.
+        """
+        return httpx.AsyncClient()

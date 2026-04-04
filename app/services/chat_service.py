@@ -10,9 +10,12 @@ import logging
 import uuid
 from typing import Any
 
+from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.dto.unified_prompt import MessageItem, UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse
+from app.infrastructure.database.repositories import ProviderRepository
+from app.services.log_service import LogService
 
 logger = logging.getLogger(__name__)
 
@@ -22,10 +25,11 @@ class ChatService:
 
     def __init__(
         self,
-        provider_repo: Any,
-        log_service: Any,
-        adapter: Any,
+        provider_repo: ProviderRepository,
+        log_service: LogService,
+        adapter: GatewayProvider,
     ) -> None:
+        """[YEL-1] Concrete types instead of Any for dependency injection."""
         self.provider_repo = provider_repo
         self.log_service = log_service
         self.adapter = adapter

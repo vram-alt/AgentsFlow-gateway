@@ -794,3 +794,277 @@ class TestLogRepository:
 
         with pytest.raises(OperationalError):
             await log_repo.list_all()
+
+
+# ===================================================================
+# [UPGRADE] LogRepository — новые методы (repositories_upgrade_spec.md)
+# ===================================================================
+
+
+class TestLogRepositoryGetById:
+    """Тесты для нового метода LogRepository.get_by_id (upgrade spec §1)."""
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_found(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Должен вернуть LogEntryModel по числовому ID."""
+        expected = _make_log(id=42, trace_id="trace-042")
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = expected
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.get_by_id(42)
+
+        assert result is expected
+        assert result.id == 42
+        mock_session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_not_found(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Должен вернуть None, если запись не найдена."""
+        result_mock = MagicMock()
+        result_mock.scalar_one_or_none.return_value = None
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.get_by_id(999)
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_by_id_operational_error(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """[SRE_MARKER] Ошибка БД при get_by_id → OperationalError пробрасывается."""
+        mock_session.execute.side_effect = OperationalError(
+            statement="SELECT",
+            params={},
+            orig=Exception("connection refused"),
+        )
+
+        with pytest.raises(OperationalError):
+            await log_repo.get_by_id(1)
+
+
+class TestLogRepositoryCountByHour:
+    """Тесты для нового метода LogRepository.count_by_hour (upgrade spec §2)."""
+
+    @pytest.mark.asyncio
+    async def test_count_by_hour_returns_list_of_tuples(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Должен вернуть список кортежей (hour_string, count)."""
+        since = datetime.datetime(2026, 4, 1, tzinfo=datetime.timezone.utc)
+        expected = [
+            ("2026-04-01 10:00", 5),
+            ("2026-04-01 11:00", 12),
+            ("2026-04-01 12:00", 3),
+        ]
+        result_mock = MagicMock()
+        result_mock.all.return_value = expected
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.count_by_hour(since=since)
+
+        assert isinstance(result, list)
+        assert len(result) == 3
+        mock_session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_count_by_hour_empty_result(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Пустой результат — пустой список."""
+        since = datetime.datetime(2026, 4, 1, tzinfo=datetime.timezone.utc)
+        result_mock = MagicMock()
+        result_mock.all.return_value = []
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.count_by_hour(since=since)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_count_by_hour_sorted_ascending(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Результат отсортирован по hour в порядке возрастания."""
+        since = datetime.datetime(2026, 4, 1, tzinfo=datetime.timezone.utc)
+        expected = [
+            ("2026-04-01 08:00", 2),
+            ("2026-04-01 09:00", 7),
+            ("2026-04-01 10:00", 1),
+        ]
+        result_mock = MagicMock()
+        result_mock.all.return_value = expected
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.count_by_hour(since=since)
+
+        hours = [r[0] for r in result]
+        assert hours == sorted(hours)
+
+
+class TestLogRepositoryAggregateTokenStats:
+    """Тесты для нового метода LogRepository.aggregate_token_stats (upgrade spec §3)."""
+
+    @pytest.mark.asyncio
+    async def test_aggregate_token_stats_returns_dict(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Должен вернуть словарь с total_tokens и avg_latency_ms."""
+        # Мокаем потоковую обработку — возвращаем записи с payload
+        log1 = _make_log(
+            id=1,
+            event_type="chat_request",
+            payload=json.dumps({
+                "response": {"usage": {"total_tokens": 100}, "latency_ms": 200.0}
+            }),
+        )
+        log2 = _make_log(
+            id=2,
+            event_type="chat_request",
+            payload=json.dumps({
+                "response": {"usage": {"total_tokens": 50}, "latency_ms": 300.0}
+            }),
+        )
+        result_mock = MagicMock()
+        result_mock.scalars.return_value.all.return_value = [log1, log2]
+        # Для потоковой обработки
+        result_mock.scalars.return_value.__aiter__ = MagicMock(
+            return_value=iter([log1, log2])
+        )
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.aggregate_token_stats()
+
+        assert isinstance(result, dict)
+        assert "total_tokens" in result
+        assert "avg_latency_ms" in result
+
+    @pytest.mark.asyncio
+    async def test_aggregate_token_stats_empty_table(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Пустая таблица → total_tokens=0, avg_latency_ms=0.0."""
+        result_mock = MagicMock()
+        result_mock.scalars.return_value.all.return_value = []
+        result_mock.scalars.return_value.__aiter__ = MagicMock(
+            return_value=iter([])
+        )
+        mock_session.execute.return_value = result_mock
+
+        result = await log_repo.aggregate_token_stats()
+
+        assert result["total_tokens"] == 0
+        assert result["avg_latency_ms"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_aggregate_token_stats_corrupted_payload_skipped(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """[SRE_MARKER] Повреждённый JSON в payload → запись пропускается, не прерывает обработку.
+
+        repositories_upgrade_spec.md §3.3 п.4a: логировать WARNING и пропустить.
+        """
+        good_log = _make_log(
+            id=1,
+            event_type="chat_request",
+            payload=json.dumps({
+                "response": {"usage": {"total_tokens": 100}, "latency_ms": 200.0}
+            }),
+        )
+        bad_log = _make_log(
+            id=2,
+            event_type="chat_request",
+            payload="NOT_VALID_JSON{{{",
+        )
+        result_mock = MagicMock()
+        result_mock.scalars.return_value.all.return_value = [good_log, bad_log]
+        result_mock.scalars.return_value.__aiter__ = MagicMock(
+            return_value=iter([good_log, bad_log])
+        )
+        mock_session.execute.return_value = result_mock
+
+        # Не должен бросить исключение
+        result = await log_repo.aggregate_token_stats()
+
+        assert isinstance(result, dict)
+        assert result["total_tokens"] >= 0
+
+
+class TestLogRepositoryListForExport:
+    """Тесты для нового метода LogRepository.list_for_export (upgrade spec §4)."""
+
+    @pytest.mark.asyncio
+    async def test_list_for_export_yields_entries(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Должен yield-ить LogEntryModel записи."""
+        logs = [_make_log(id=i) for i in range(1, 4)]
+        result_mock = MagicMock()
+        result_mock.scalars.return_value.all.return_value = logs
+        # Для async generator
+        result_mock.scalars.return_value.__aiter__ = MagicMock(
+            return_value=iter(logs)
+        )
+        mock_session.execute.return_value = result_mock
+
+        collected = []
+        async for entry in log_repo.list_for_export(event_type=None, limit=5000):
+            collected.append(entry)
+
+        assert len(collected) > 0
+
+    @pytest.mark.asyncio
+    async def test_list_for_export_with_event_type_filter(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """Фильтрация по event_type передаётся в SQL-запрос."""
+        result_mock = MagicMock()
+        result_mock.scalars.return_value.all.return_value = []
+        result_mock.scalars.return_value.__aiter__ = MagicMock(
+            return_value=iter([])
+        )
+        mock_session.execute.return_value = result_mock
+
+        collected = []
+        async for entry in log_repo.list_for_export(event_type="chat_request", limit=100):
+            collected.append(entry)
+
+        assert collected == []
+        mock_session.execute.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_list_for_export_default_limit_5000(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """[SRE_MARKER] Значение limit по умолчанию = 5000 (ограничение памяти).
+
+        repositories_upgrade_spec.md §4.4: ~25MB при payload ~5KB.
+        """
+        import inspect
+
+        sig = inspect.signature(log_repo.list_for_export)
+        limit_param = sig.parameters.get("limit")
+        assert limit_param is not None, "list_for_export должен принимать параметр limit"
+        assert limit_param.default == 5000, (
+            f"limit по умолчанию должен быть 5000, получено {limit_param.default}"
+        )
+
+    @pytest.mark.asyncio
+    async def test_list_for_export_operational_error(
+        self, log_repo: LogRepository, mock_session: AsyncMock
+    ):
+        """[SRE_MARKER] Ошибка БД при list_for_export → OperationalError пробрасывается."""
+        mock_session.execute.side_effect = OperationalError(
+            statement="SELECT",
+            params={},
+            orig=Exception("connection refused"),
+        )
+
+        with pytest.raises(OperationalError):
+            async for _ in log_repo.list_for_export(event_type=None, limit=100):
+                pass

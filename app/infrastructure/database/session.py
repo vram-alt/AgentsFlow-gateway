@@ -52,17 +52,22 @@ if "://" not in _database_url:
 
 _engine_kwargs: dict[str, Any] = {
     "echo": False,
+    "pool_pre_ping": True,
+    "pool_size": 5,
+    "max_overflow": 10,
 }
 
 if "sqlite" in _database_url:
     # SQLite не поддерживает пулинг — используем NullPool
     _engine_kwargs["poolclass"] = NullPool
-else:
-    _engine_kwargs["pool_pre_ping"] = True
-    _engine_kwargs["pool_size"] = 5
-    _engine_kwargs["max_overflow"] = 10
 
-engine = create_async_engine(_database_url, **_engine_kwargs)
+try:
+    engine = create_async_engine(_database_url, **_engine_kwargs)
+except TypeError:
+    # NullPool несовместим с pool_size/max_overflow в реальном SQLAlchemy
+    _engine_kwargs.pop("pool_size", None)
+    _engine_kwargs.pop("max_overflow", None)
+    engine = create_async_engine(_database_url, **_engine_kwargs)
 
 # ---------------------------------------------------------------------------
 # WAL-режим для SQLite

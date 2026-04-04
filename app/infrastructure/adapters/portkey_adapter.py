@@ -180,6 +180,14 @@ class PortkeyAdapter(GatewayProvider):
             await self._client.aclose()
             self._client = None
 
+    def get_http_client(self) -> httpx.AsyncClient:
+        """Публичный метод для получения переиспользуемого httpx.AsyncClient.
+
+        Делегирует вызов к приватному _get_http_client().
+        Используется DI-фабрикой get_http_client() (dependencies_upgrade_spec §3.3).
+        """
+        return self._get_http_client()
+
     # ------------------------------------------------------------------
     # Внутренние методы
     # ------------------------------------------------------------------

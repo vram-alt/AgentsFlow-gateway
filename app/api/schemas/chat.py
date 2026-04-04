@@ -38,12 +38,16 @@ class UsageInfo(BaseModel):
 
 
 class ChatResponse(BaseModel):
-    """Success response for POST /api/chat/send."""
+    """Success response for POST /api/chat/send.
+
+    [YEL] usage typed as Optional[UsageInfo] instead of Optional[dict[str, Any]]
+    for stronger validation. Falls back to dict for backward compatibility.
+    """
 
     trace_id: str
     content: str
     model: str
-    usage: Optional[dict[str, Any]] = None
+    usage: Optional[UsageInfo | dict[str, Any]] = None
     guardrail_blocked: bool
 
 

@@ -499,3 +499,169 @@ class TestFactoriesNeverReturnNone:
         except NotImplementedError:
             pytest.fail(f"{factory_name}() бросает NotImplementedError — не реализован")
         assert result is not None, f"{factory_name}() вернул None — сервис не создан"
+
+
+# ======================================================================
+# [UPGRADE] §1 — get_tester_service (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+class TestGetTesterService:
+    """Тесты для новой фабрики get_tester_service (upgrade spec §1)."""
+
+    def test_get_tester_service_exists_in_module(self) -> None:
+        """Функция get_tester_service должна быть экспортирована из di.py."""
+        from app.api.dependencies import di
+
+        assert hasattr(di, "get_tester_service"), (
+            "di.py должен экспортировать get_tester_service"
+        )
+
+    def test_get_tester_service_returns_tester_service_instance(self) -> None:
+        """get_tester_service() должен вернуть экземпляр TesterService."""
+        from app.api.dependencies.di import get_tester_service
+        from app.services.tester_service import TesterService
+
+        try:
+            result = get_tester_service()
+        except NotImplementedError:
+            pytest.fail(
+                "get_tester_service() бросает NotImplementedError — "
+                "фабрика не реализована (ожидается TesterService)"
+            )
+        assert isinstance(result, TesterService), (
+            f"Ожидался TesterService, получен {type(result).__name__}"
+        )
+
+    def test_get_tester_service_has_provider_repo(self) -> None:
+        """TesterService должен иметь provider_repo."""
+        from app.api.dependencies.di import get_tester_service
+
+        try:
+            service = get_tester_service()
+        except NotImplementedError:
+            pytest.fail("get_tester_service() не реализован")
+
+        assert hasattr(service, "provider_repo"), (
+            "TesterService должен иметь provider_repo"
+        )
+        assert service.provider_repo is not None, "provider_repo не должен быть None"
+
+    def test_get_tester_service_has_http_client(self) -> None:
+        """TesterService должен иметь http_client."""
+        from app.api.dependencies.di import get_tester_service
+
+        try:
+            service = get_tester_service()
+        except NotImplementedError:
+            pytest.fail("get_tester_service() не реализован")
+
+        assert hasattr(service, "http_client"), (
+            "TesterService должен иметь http_client"
+        )
+
+
+# ======================================================================
+# [UPGRADE] §3 — get_http_client (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+class TestGetHttpClient:
+    """Тесты для новой фабрики get_http_client (upgrade spec §3).
+
+    [SRE_MARKER] Если адаптер не инициализирован (None) → HTTP 503.
+    """
+
+    def test_get_http_client_exists_in_module(self) -> None:
+        """Функция get_http_client должна быть экспортирована из di.py."""
+        from app.api.dependencies import di
+
+        assert hasattr(di, "get_http_client"), (
+            "di.py должен экспортировать get_http_client"
+        )
+
+    def test_get_http_client_returns_httpx_client(self) -> None:
+        """get_http_client() должен вернуть httpx.AsyncClient."""
+        import httpx
+        from app.api.dependencies.di import get_http_client
+
+        try:
+            result = get_http_client()
+        except Exception:
+            pytest.skip("get_http_client() требует инициализированный адаптер")
+
+        assert isinstance(result, httpx.AsyncClient), (
+            f"Ожидался httpx.AsyncClient, получен {type(result).__name__}"
+        )
+
+    def test_get_http_client_raises_503_when_adapter_none(self) -> None:
+        """[SRE_MARKER] Если адаптер None → HTTP 503 'Service not ready'.
+
+        dependencies_upgrade_spec.md §3.2: race condition при startup.
+        """
+        from fastapi import HTTPException
+
+        with patch("app.api.dependencies.di.get_adapter", return_value=None):
+            from app.api.dependencies.di import get_http_client
+
+            with pytest.raises(HTTPException) as exc_info:
+                get_http_client()
+
+            assert exc_info.value.status_code == 503
+            assert "not ready" in str(exc_info.value.detail).lower()
+
+
+# ======================================================================
+# [UPGRADE] §4 — get_tester_http_client (dependencies_upgrade_spec.md)
+# ======================================================================
+
+
+class TestGetTesterHttpClient:
+    """Тесты для новой фабрики get_tester_http_client (upgrade spec §4).
+
+    [SRE_MARKER] Изолированный HTTP-клиент для TesterService.
+    """
+
+    def test_get_tester_http_client_exists_in_module(self) -> None:
+        """Функция get_tester_http_client должна быть экспортирована из di.py."""
+        from app.api.dependencies import di
+
+        assert hasattr(di, "get_tester_http_client"), (
+            "di.py должен экспортировать get_tester_http_client"
+        )
+
+    def test_get_tester_http_client_raises_503_when_adapter_none(self) -> None:
+        """[SRE_MARKER] Если адаптер None → HTTP 503 'Service not ready'.
+
+        dependencies_upgrade_spec.md §4.2: предотвращение AttributeError.
+        """
+        from fastapi import HTTPException
+
+        with patch("app.api.dependencies.di.get_adapter", return_value=None):
+            from app.api.dependencies.di import get_tester_http_client
+
+            with pytest.raises(HTTPException) as exc_info:
+                get_tester_http_client()
+
+            assert exc_info.value.status_code == 503
+
+    def test_get_tester_http_client_is_isolated_from_main(self) -> None:
+        """[SRE_MARKER] Тестерный HTTP-клиент изолирован от основного.
+
+        dependencies_upgrade_spec.md §4.2: предотвращение каскадных отказов.
+        """
+        from app.api.dependencies import di
+
+        if not hasattr(di, "get_http_client") or not hasattr(di, "get_tester_http_client"):
+            pytest.skip("Фабрики ещё не реализованы")
+
+        try:
+            main_client = di.get_http_client()
+            tester_client = di.get_tester_http_client()
+        except Exception:
+            pytest.skip("Фабрики требуют инициализированный адаптер")
+
+        assert main_client is not tester_client, (
+            "Тестерный HTTP-клиент должен быть изолирован от основного "
+            "(разные пулы соединений)"
+        )

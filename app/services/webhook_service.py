@@ -8,6 +8,9 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
+from app.infrastructure.database.repositories import LogRepository
+from app.services.log_service import LogService
+
 _UUID_V4_RE = re.compile(
     r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
 )
@@ -16,7 +19,8 @@ _UUID_V4_RE = re.compile(
 class WebhookService:
     """Сервис обработки входящих webhook-отчётов об инцидентах безопасности."""
 
-    def __init__(self, log_service: Any, log_repo: Any) -> None:
+    def __init__(self, log_service: LogService, log_repo: LogRepository) -> None:
+        """[YEL-1] Concrete types instead of Any for dependency injection."""
         self.log_service = log_service
         self.log_repo = log_repo
 

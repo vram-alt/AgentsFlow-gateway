@@ -1,7 +1,7 @@
 """
-Конфигурация приложения через Pydantic Settings.
+Application configuration via Pydantic Settings.
 
-Минимальная реализация для поддержки models.py (encryption_key).
+Minimal implementation to support models.py (encryption_key).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Централизованная конфигурация, читаемая из переменных окружения."""
+    """Centralized configuration loaded from environment variables."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     webhook_secret: str
     encryption_key: str
     external_http_timeout: int = 30
+    enable_tester_console: bool = False
 
     # ------------------------------------------------------------------
     # Validators
@@ -37,7 +38,7 @@ class Settings(BaseSettings):
     @classmethod
     def _database_url_not_empty(cls, v: str) -> str:
         if not v or not v.strip():
-            raise ValueError("database_url must not be empty (пустая строка запрещена)")
+            raise ValueError("database_url must not be empty")
         return v
 
     @field_validator("admin_username")
@@ -47,7 +48,7 @@ class Settings(BaseSettings):
         if v.lower() in trivial:
             raise ValueError(
                 "admin_username is trivial/predictable — "
-                "значения admin, root, administrator запрещены"
+                "values admin, root, administrator are forbidden"
             )
         return v
 
@@ -55,12 +56,12 @@ class Settings(BaseSettings):
     @classmethod
     def _admin_password_complexity(cls, v: str) -> str:
         if len(v) < 12:
-            raise ValueError("admin_password must be at least 12 символов length")
+            raise ValueError("admin_password must be at least 12 characters long")
         if not re.search(r"\d", v):
-            raise ValueError("admin_password must contain at least one digit (цифру)")
+            raise ValueError("admin_password must contain at least one digit")
         if not re.search(r"[^a-zA-Z0-9]", v):
             raise ValueError(
-                "admin_password must contain at least one special character (спецсимвол)"
+                "admin_password must contain at least one special character"
             )
         return v
 
@@ -68,7 +69,7 @@ class Settings(BaseSettings):
     @classmethod
     def _webhook_secret_min_length(cls, v: str) -> str:
         if len(v) < 16:
-            raise ValueError("webhook_secret must be at least 16 символов length")
+            raise ValueError("webhook_secret must be at least 16 characters long")
         return v
 
     @field_validator("encryption_key")
@@ -80,7 +81,7 @@ class Settings(BaseSettings):
             )
         try:
             decoded = base64.urlsafe_b64decode(v)
-            # Fernet key: 32 bytes encoded → 44 base64 chars
+            # Fernet key: 32 bytes encoded -> 44 base64 chars
             if len(decoded) != 32:
                 raise ValueError(
                     "encryption_key base64 decodes to wrong length — "
@@ -100,12 +101,12 @@ class Settings(BaseSettings):
     def _timeout_in_range(cls, v: int) -> int:
         if v < 5 or v > 120:
             raise ValueError(
-                "external_http_timeout must be in range [5, 120] (диапазон)"
+                "external_http_timeout must be in range [5, 120]"
             )
         return v
 
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """Возвращает кэшированный (синглтон) экземпляр Settings."""
+    """Return a cached (singleton) Settings instance."""
     return Settings()

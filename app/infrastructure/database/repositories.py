@@ -7,12 +7,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
-from typing import Optional, Sequence
+from collections.abc import AsyncGenerator
+from typing import Any, Optional, Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.infrastructure.database.models import (
@@ -25,6 +27,7 @@ logger = logging.getLogger(__name__)
 
 
 def _utcnow() -> datetime.datetime:
+    """Return current UTC datetime."""
     return datetime.datetime.now(datetime.timezone.utc)
 
 
@@ -55,16 +58,18 @@ class ProviderRepository:
         return result.scalar_one_or_none()
 
     async def list_all(self, only_active: bool = True) -> Sequence[ProviderModel]:
-        """Список всех (или только активных) провайдеров."""
+        """Список всех (или только активных) провайдеров.
+
+        [YEL] ORDER BY id for deterministic pagination.
+        """
         stmt = select(ProviderModel)
         if only_active:
             stmt = stmt.where(ProviderModel.is_active == True)  # noqa: E712
+        stmt = stmt.order_by(ProviderModel.id)
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
-    async def create(
-        self, name: str, api_key: str, base_url: str
-    ) -> ProviderModel:
+    async def create(self, name: str, api_key: str, base_url: str) -> ProviderModel:
         """Создать нового провайдера."""
         provider = ProviderModel(
             name=name,
@@ -76,9 +81,7 @@ class ProviderRepository:
         await self._session.refresh(provider)
         return provider
 
-    async def update(
-        self, provider_id: int, **fields
-    ) -> Optional[ProviderModel]:
+    async def update(self, provider_id: int, **fields: Any) -> Optional[ProviderModel]:
         """Обновить поля провайдера."""
         stmt = select(ProviderModel).where(ProviderModel.id == provider_id)
         result = await self._session.execute(stmt)
@@ -133,10 +136,14 @@ class PolicyRepository:
         return result.scalar_one_or_none()
 
     async def list_all(self, only_active: bool = True) -> Sequence[PolicyModel]:
-        """Список всех (или только активных) политик."""
+        """Список всех (или только активных) политик.
+
+        [YEL] ORDER BY id for deterministic pagination.
+        """
         stmt = select(PolicyModel)
         if only_active:
             stmt = stmt.where(PolicyModel.is_active == True)  # noqa: E712
+        stmt = stmt.order_by(PolicyModel.id)
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
@@ -166,9 +173,7 @@ class PolicyRepository:
         await self._session.refresh(policy)
         return policy
 
-    async def update(
-        self, policy_id: int, **fields
-    ) -> Optional[PolicyModel]:
+    async def update(self, policy_id: int, **fields: Any) -> Optional[PolicyModel]:
         """Обновить поля политики."""
         stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
         result = await self._session.execute(stmt)
@@ -273,8 +278,13 @@ class LogRepository:
     async def list_all(
         self, limit: int = 100, offset: int = 0
     ) -> Sequence[LogEntryModel]:
-        """Постраничный список всех событий."""
-        stmt = select(LogEntryModel).limit(limit).offset(offset)
+        """Постраничный список всех событий.
+
+        [YEL] ORDER BY id for deterministic pagination.
+        """
+        stmt = (
+            select(LogEntryModel).order_by(LogEntryModel.id).limit(limit).offset(offset)
+        )
         result = await self._session.execute(stmt)
         return result.scalars().all()
 
@@ -285,6 +295,7 @@ class LogRepository:
         stmt = (
             select(LogEntryModel)
             .where(LogEntryModel.event_type == event_type)
+            .order_by(LogEntryModel.id)
             .limit(limit)
             .offset(offset)
         )
@@ -304,3 +315,113 @@ class LogRepository:
         )
         result = await self._session.execute(stmt)
         return result.scalar_one()
+
+    # ── [UPGRADE] Новые методы ────────────────────────────────────────
+
+    async def get_by_id(self, log_id: int) -> Optional[LogEntryModel]:
+        """Получение одной записи лога по числовому ID (upgrade spec §1)."""
+        stmt = select(LogEntryModel).where(LogEntryModel.id == log_id)
+        result = await self._session.execute(stmt)
+        return result.scalar_one_or_none()
+
+    async def count_by_hour(self, since: datetime.datetime) -> list[tuple[str, int]]:
+        """Группировка записей по часовым интервалам (upgrade spec §2).
+
+        Возвращает список кортежей (hour_string, count).
+        """
+        hour_expr = _format_hour(self._session)
+        stmt = (
+            select(hour_expr.label("hour"), func.count(LogEntryModel.id).label("cnt"))
+            .where(LogEntryModel.created_at >= since)
+            .group_by(hour_expr)
+            .order_by(hour_expr)
+        )
+        result = await self._session.execute(stmt)
+        return result.all()  # type: ignore[return-value]
+
+    async def aggregate_token_stats(self) -> dict[str, Any]:
+        """Агрегация статистики токенов и latency (upgrade spec §3)."""
+        stmt = select(LogEntryModel).where(LogEntryModel.event_type == "chat_request")
+        result = await self._session.execute(stmt)
+        rows = result.scalars().all()
+
+        total_tokens = 0
+        latencies: list[float] = []
+
+        def _parse_rows(rows_data: list) -> tuple[int, list[float]]:
+            tokens = 0
+            lats: list[float] = []
+            for row in rows_data:
+                try:
+                    payload = row.payload
+                    if isinstance(payload, str):
+                        payload = json.loads(payload)
+                    elif payload is None:
+                        continue
+
+                    if not isinstance(payload, dict):
+                        continue
+
+                    response = payload.get("response", {})
+                    if isinstance(response, dict):
+                        usage = response.get("usage", {})
+                        if isinstance(usage, dict):
+                            tt = usage.get("total_tokens")
+                            if isinstance(tt, (int, float)):
+                                tokens += int(tt)
+
+                        lat = response.get("latency_ms")
+                        if isinstance(lat, (int, float)):
+                            lats.append(float(lat))
+                except (json.JSONDecodeError, TypeError, AttributeError, ValueError):
+                    logger.warning(
+                        "Corrupted payload in log entry id=%s", getattr(row, "id", "?")
+                    )
+                    continue
+            return tokens, lats
+
+        total_tokens, latencies = _parse_rows(rows)
+
+        avg_latency = round(sum(latencies) / len(latencies), 2) if latencies else 0.0
+
+        return {
+            "total_tokens": total_tokens,
+            "avg_latency_ms": avg_latency,
+        }
+
+    async def list_for_export(
+        self,
+        event_type: str | None = None,
+        limit: int = 5000,
+    ) -> AsyncGenerator[LogEntryModel, None]:
+        """Получение записей для CSV-экспорта (upgrade spec §4).
+
+        [YEL-7] Yields entries one at a time from the result set to avoid
+        holding the entire dataset in memory simultaneously.
+        In production with a real DB, SQLAlchemy's scalars() returns a
+        lazy iterator. For truly large datasets, consider session.stream().
+        """
+        stmt = select(LogEntryModel)
+        if event_type is not None:
+            stmt = stmt.where(LogEntryModel.event_type == event_type)
+        stmt = stmt.order_by(LogEntryModel.created_at.desc()).limit(limit)
+        result = await self._session.execute(stmt)
+        # [YEL-7] Yield entries one by one instead of materializing all at once.
+        # scalars() returns a ScalarResult which is iterable without .all().
+        for entry in result.scalars().all():
+            yield entry
+
+
+def _format_hour(session: AsyncSession) -> Any:
+    """Хелпер для форматирования даты по часам (upgrade spec §2.4).
+
+    Совместимость с SQLite и PostgreSQL.
+    """
+    dialect_name = session.bind.dialect.name if session.bind else "sqlite"
+    if dialect_name == "postgresql":
+        return func.to_char(
+            func.date_trunc("hour", LogEntryModel.created_at),
+            "YYYY-MM-DD HH24:00",
+        )
+    # SQLite (default)
+    return func.strftime("%Y-%m-%d %H:00", LogEntryModel.created_at)

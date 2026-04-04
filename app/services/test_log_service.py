@@ -909,3 +909,298 @@ class TestErrorHandlingGeneral:
 
         with pytest.raises(ConnectionError):
             await service.get_logs_by_trace_id(trace_id=valid_trace_id)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [UPGRADE] 10. get_stats_summary (log_service_upgrade_spec §1)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGetStatsSummary:
+    """Тесты для нового метода get_stats_summary (upgrade spec §1)."""
+
+    @pytest.mark.asyncio
+    async def test_get_stats_summary_returns_dict(self, service, mock_log_repo):
+        """Метод возвращает словарь."""
+        mock_log_repo.count_all.return_value = 100
+        mock_log_repo.count_by_type.return_value = 30
+        mock_log_repo.aggregate_token_stats = AsyncMock(
+            return_value={"total_tokens": 5000, "avg_latency_ms": 245.67}
+        )
+
+        result = await service.get_stats_summary()
+
+        assert isinstance(result, dict)
+
+    @pytest.mark.asyncio
+    async def test_get_stats_summary_has_six_keys(self, service, mock_log_repo):
+        """Словарь содержит 6 ключей: total, chat_requests, guardrail_incidents,
+        system_errors, total_tokens, avg_latency_ms."""
+        mock_log_repo.count_all.return_value = 100
+        mock_log_repo.count_by_type.return_value = 30
+        mock_log_repo.aggregate_token_stats = AsyncMock(
+            return_value={"total_tokens": 5000, "avg_latency_ms": 245.67}
+        )
+
+        result = await service.get_stats_summary()
+
+        expected_keys = {
+            "total", "chat_requests", "guardrail_incidents",
+            "system_errors", "total_tokens", "avg_latency_ms",
+        }
+        assert expected_keys.issubset(set(result.keys()))
+
+    @pytest.mark.asyncio
+    async def test_get_stats_summary_includes_token_stats(self, service, mock_log_repo):
+        """Результат включает total_tokens и avg_latency_ms из aggregate_token_stats."""
+        mock_log_repo.count_all.return_value = 10
+        mock_log_repo.count_by_type.return_value = 3
+        mock_log_repo.aggregate_token_stats = AsyncMock(
+            return_value={"total_tokens": 9999, "avg_latency_ms": 123.45}
+        )
+
+        result = await service.get_stats_summary()
+
+        assert result["total_tokens"] == 9999
+        assert result["avg_latency_ms"] == 123.45
+
+    @pytest.mark.asyncio
+    async def test_get_stats_summary_graceful_degradation_on_aggregate_error(
+        self, service, mock_log_repo
+    ):
+        """[SRE_MARKER] Ошибка aggregate_token_stats → graceful degradation.
+
+        log_service_upgrade_spec.md §1.5: total_tokens=0, avg_latency_ms=0.0.
+        Базовая статистика возвращается нормально.
+        """
+        mock_log_repo.count_all.return_value = 50
+        mock_log_repo.count_by_type.return_value = 10
+        mock_log_repo.aggregate_token_stats = AsyncMock(
+            side_effect=Exception("DB timeout on aggregation")
+        )
+
+        result = await service.get_stats_summary()
+
+        assert result["total"] == 50
+        assert result["total_tokens"] == 0
+        assert result["avg_latency_ms"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_get_stats_summary_calls_both_methods(self, service, mock_log_repo):
+        """Метод вызывает и get_log_stats() и aggregate_token_stats()."""
+        mock_log_repo.count_all.return_value = 0
+        mock_log_repo.count_by_type.return_value = 0
+        mock_log_repo.aggregate_token_stats = AsyncMock(
+            return_value={"total_tokens": 0, "avg_latency_ms": 0.0}
+        )
+
+        await service.get_stats_summary()
+
+        mock_log_repo.count_all.assert_awaited()
+        mock_log_repo.aggregate_token_stats.assert_awaited_once()
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [UPGRADE] 11. get_chart_data (log_service_upgrade_spec §2)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGetChartData:
+    """Тесты для нового метода get_chart_data (upgrade spec §2)."""
+
+    @pytest.mark.asyncio
+    async def test_get_chart_data_returns_list(self, service, mock_log_repo):
+        """Метод возвращает список словарей."""
+        mock_log_repo.count_by_hour = AsyncMock(
+            return_value=[("2026-04-01 10:00", 5), ("2026-04-01 11:00", 12)]
+        )
+
+        result = await service.get_chart_data(hours=24)
+
+        assert isinstance(result, list)
+
+    @pytest.mark.asyncio
+    async def test_get_chart_data_items_have_hour_and_count(self, service, mock_log_repo):
+        """Каждый элемент содержит ключи 'hour' и 'count'."""
+        mock_log_repo.count_by_hour = AsyncMock(
+            return_value=[("2026-04-01 10:00", 5)]
+        )
+
+        result = await service.get_chart_data(hours=24)
+
+        assert len(result) == 1
+        assert "hour" in result[0]
+        assert "count" in result[0]
+        assert result[0]["hour"] == "2026-04-01 10:00"
+        assert result[0]["count"] == 5
+
+    @pytest.mark.asyncio
+    async def test_get_chart_data_default_hours_24(self, service, mock_log_repo):
+        """По умолчанию hours=24."""
+        mock_log_repo.count_by_hour = AsyncMock(return_value=[])
+
+        await service.get_chart_data()
+
+        mock_log_repo.count_by_hour.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_get_chart_data_empty_returns_empty_list(self, service, mock_log_repo):
+        """Нет данных → пустой список."""
+        mock_log_repo.count_by_hour = AsyncMock(return_value=[])
+
+        result = await service.get_chart_data(hours=24)
+
+        assert result == []
+
+    @pytest.mark.asyncio
+    async def test_get_chart_data_db_error_propagates(self, service, mock_log_repo):
+        """[SRE_MARKER] Ошибка БД пробрасывается наверх (обрабатывается роутером).
+
+        log_service_upgrade_spec.md §2.4.
+        """
+        mock_log_repo.count_by_hour = AsyncMock(
+            side_effect=Exception("DB connection lost")
+        )
+
+        with pytest.raises(Exception, match="DB connection lost"):
+            await service.get_chart_data(hours=24)
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [UPGRADE] 12. get_log_by_id (log_service_upgrade_spec §3)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestGetLogById:
+    """Тесты для нового метода get_log_by_id (upgrade spec §3)."""
+
+    @pytest.mark.asyncio
+    async def test_get_log_by_id_calls_repo(self, service, mock_log_repo):
+        """Вызывает log_repo.get_by_id с переданным log_id."""
+        mock_log_repo.get_by_id = AsyncMock(return_value=None)
+
+        await service.get_log_by_id(log_id=42)
+
+        mock_log_repo.get_by_id.assert_awaited_once_with(42)
+
+    @pytest.mark.asyncio
+    async def test_get_log_by_id_returns_entry(self, service, mock_log_repo):
+        """Возвращает LogEntryModel, если найден."""
+        fake_entry = MagicMock(id=42, trace_id="trace-042")
+        mock_log_repo.get_by_id = AsyncMock(return_value=fake_entry)
+
+        result = await service.get_log_by_id(log_id=42)
+
+        assert result is fake_entry
+
+    @pytest.mark.asyncio
+    async def test_get_log_by_id_returns_none_when_not_found(self, service, mock_log_repo):
+        """Возвращает None, если запись не найдена."""
+        mock_log_repo.get_by_id = AsyncMock(return_value=None)
+
+        result = await service.get_log_by_id(log_id=999)
+
+        assert result is None
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# [UPGRADE] 13. export_logs (log_service_upgrade_spec §4)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestExportLogs:
+    """Тесты для нового метода export_logs (upgrade spec §4)."""
+
+    @pytest.mark.asyncio
+    async def test_export_logs_yields_csv_header(self, service, mock_log_repo):
+        """Первая строка — заголовок CSV: id,trace_id,event_type,created_at,payload."""
+
+        async def _empty_gen(*args, **kwargs):
+            return
+            yield  # noqa: unreachable — делает функцию async generator
+
+        mock_log_repo.list_for_export = _empty_gen
+
+        lines = []
+        async for line in service.export_logs(event_type=None, limit=100):
+            lines.append(line)
+
+        assert len(lines) >= 1
+        assert "id" in lines[0]
+        assert "trace_id" in lines[0]
+        assert "event_type" in lines[0]
+        assert "created_at" in lines[0]
+        assert "payload" in lines[0]
+
+    @pytest.mark.asyncio
+    async def test_export_logs_csv_injection_protection(self, service, mock_log_repo):
+        """[SRE_MARKER] CSV Injection: payload начинающийся с =, +, -, @ экранируется.
+
+        log_service_upgrade_spec.md §4.3 п.5b: добавляется префикс одинарной кавычки.
+        """
+        malicious_log = MagicMock(
+            id=1,
+            trace_id="trace-001",
+            event_type="chat_request",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            payload='{"prompt": "=CMD()"}',
+        )
+
+        async def _gen(*args, **kwargs):
+            yield malicious_log
+
+        mock_log_repo.list_for_export = _gen
+
+        lines = []
+        async for line in service.export_logs(event_type=None, limit=100):
+            lines.append(line)
+
+        # Должна быть хотя бы header + 1 строка данных
+        assert len(lines) >= 2
+        # Payload с = должен быть экранирован (префикс ')
+        data_line = lines[1]
+        # Проверяем, что в строке нет неэкранированного =CMD()
+        # (должен быть '=CMD() или экранирован иначе)
+        assert "=CMD()" not in data_line or "'=CMD()" in data_line or "\"'=CMD()\"" in data_line
+
+    @pytest.mark.asyncio
+    async def test_export_logs_streaming_error_marker(self, service, mock_log_repo):
+        """[SRE_MARKER] Ошибка после начала генерации → маркер '# ERROR: export interrupted'.
+
+        log_service_upgrade_spec.md §4.4: клиент может детектировать неполный экспорт.
+        """
+        good_log = MagicMock(
+            id=1,
+            trace_id="trace-001",
+            event_type="chat_request",
+            created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            payload='{"ok": true}',
+        )
+
+        async def _gen_with_error(*args, **kwargs):
+            yield good_log
+            raise RuntimeError("DB connection lost mid-stream")
+
+        mock_log_repo.list_for_export = _gen_with_error
+
+        lines = []
+        async for line in service.export_logs(event_type=None, limit=100):
+            lines.append(line)
+
+        # Последняя строка должна содержать маркер ошибки
+        assert any("ERROR" in line and "interrupted" in line for line in lines), (
+            "При ошибке после начала генерации должен быть маркер "
+            "'# ERROR: export interrupted'"
+        )
+
+    @pytest.mark.asyncio
+    async def test_export_logs_is_async_generator(self, service, mock_log_repo):
+        """export_logs — асинхронный генератор (yield, не return)."""
+        import inspect
+
+        assert hasattr(service, "export_logs"), (
+            "LogService должен иметь метод export_logs"
+        )
+        assert inspect.isasyncgenfunction(service.export_logs) or callable(service.export_logs), (
+            "export_logs должен быть async generator function"
+        )

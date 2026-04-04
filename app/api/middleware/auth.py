@@ -2,6 +2,13 @@
 HTTP Basic Auth & Webhook Secret dependencies with rate limiting.
 
 Spec: app/api/middleware/middleware_spec.md
+
+[RED-2] WARNING: The in-memory rate limiter below uses per-process dict storage.
+It does NOT work correctly in multi-worker deployments (e.g., gunicorn with
+multiple uvicorn workers). Each worker maintains its own independent counter,
+so an attacker can distribute brute-force attempts across workers.
+For production, replace with a shared store such as Redis + sliding-window
+algorithm. This is acceptable for the current single-worker POC.
 """
 
 from __future__ import annotations
@@ -18,6 +25,10 @@ security = HTTPBasic()
 # ---------------------------------------------------------------------------
 # In-memory rate limiter state
 # ---------------------------------------------------------------------------
+# [RED-2] WARNING: This in-memory rate limiter is NOT multi-worker safe.
+# In a multi-worker deployment (gunicorn -w N), each worker has its own
+# _failed_attempts dict. An attacker can bypass the limit by distributing
+# requests across workers. For production, use Redis-backed rate limiting.
 # Module-level dict exposed for test fixture compatibility (_reset_rate_limiter).
 # Key: client IP (str) → Value: dict with "count" (int) and "first_failure" (float)
 _failed_attempts: dict[str, dict[str, float | int]] = {}
