@@ -78,14 +78,19 @@ class PolicyService:
                 f"Provider '{provider_name}' not found or inactive — add it in Configuration > Providers first",
             )
 
-        # 2. Send configuration to cloud
+        # 2. Build the cloud config — ensure 'name' is included for Portkey API
+        cloud_config = dict(body)
+        if "name" not in cloud_config:
+            cloud_config["name"] = name
+
+        # 3. Send configuration to cloud
         cloud_result = await self.adapter.create_guardrail(
-            body, provider.api_key, provider.base_url
+            cloud_config, provider.api_key, provider.base_url
         )
         if isinstance(cloud_result, GatewayError):
             return cloud_result
 
-        # 3. Save to local DB
+        # 4. Save to local DB
         try:
             created = await self.policy_repo.create(
                 name=name,
@@ -97,7 +102,7 @@ class PolicyService:
             logger.error("Failed to save policy to DB: %s", exc)
             return _make_error("UNKNOWN", f"Failed to save policy to database: {exc}")
 
-        # 4. Return domain entity
+        # 5. Return domain entity
         return created
 
     # ── 4. update_policy ─────────────────────────────────────────────
@@ -145,7 +150,12 @@ class PolicyService:
 
     # ── 5. delete_policy ─────────────────────────────────────────────
     async def delete_policy(self, policy_id: int) -> bool | GatewayError:
-        """Delete policy: cloud (if remote_id exists) -> soft_delete in DB."""
+        """Delete policy: cloud (if remote_id exists) -> soft_delete in DB.
+
+        If cloud deletion fails with AUTH_FAILED (403) or PROVIDER_ERROR (404),
+        we still proceed with local soft-delete — the guardrail may not exist
+        on the cloud anymore (e.g., demo-mode IDs or already deleted).
+        """
         # 1. Find policy in DB
         policy = await self.policy_repo.get_by_id(policy_id)
         if policy is None:
@@ -169,7 +179,20 @@ class PolicyService:
                     policy.remote_id, provider.api_key, provider.base_url
                 )
                 if isinstance(cloud_result, GatewayError):
-                    return cloud_result
+                    # If cloud returns 403 (no permission) or 404 (not found),
+                    # proceed with local deletion — the guardrail may not exist
+                    # on the cloud (demo IDs, already deleted, or insufficient permissions)
+                    if cloud_result.error_code in ("AUTH_FAILED", "PROVIDER_ERROR"):
+                        logger.warning(
+                            "Cloud deletion failed for policy %s (remote_id=%s): %s — "
+                            "proceeding with local soft-delete",
+                            policy_id,
+                            policy.remote_id,
+                            cloud_result.message,
+                        )
+                    else:
+                        # For other errors (timeout, rate limit, etc.) — return the error
+                        return cloud_result
 
         # 3. Soft delete in DB
         result = await self.policy_repo.soft_delete(policy_id)
@@ -178,7 +201,7 @@ class PolicyService:
         return result
 
     # ── 6. list_policies ─────────────────────────────────────────────
-    async def list_policies(self, only_active: bool = False) -> Sequence[PolicyModel]:
+    async def list_policies(self, only_active: bool = True) -> Sequence[PolicyModel]:
         """Get list of policies from DB."""
         return await self.policy_repo.list_all(only_active=only_active)
 
@@ -197,7 +220,13 @@ class PolicyService:
     async def sync_policies_from_provider(
         self, provider_name: str = "portkey"
     ) -> dict[str, int] | GatewayError:
-        """Sync policies from cloud provider to local DB."""
+        """Sync policies from cloud provider to local DB.
+
+        Full two-way sync:
+        - Creates local policies for cloud guardrails not in DB
+        - Updates local policies if cloud config changed
+        - Soft-deletes local policies whose remote_id no longer exists in cloud
+        """
         # 1. Get provider credentials
         provider = await self.provider_repo.get_active_by_name(provider_name)
         if provider is None:
@@ -213,33 +242,45 @@ class PolicyService:
         if isinstance(cloud_policies, GatewayError):
             return cloud_policies
 
-        # 3. For each cloud policy — sync
+        # 3. Build set of cloud remote IDs
+        cloud_remote_ids: set[str] = set()
+        for rp in cloud_policies:
+            rid = rp.get("remote_id")
+            if rid:
+                cloud_remote_ids.add(rid)
+
+        # 4. For each cloud policy — create or update locally
         created = 0
         updated = 0
         unchanged = 0
 
         for remote_policy in cloud_policies:
             try:
-                existing = await self.policy_repo.get_by_remote_id(
-                    remote_policy["remote_id"]
-                )
+                remote_id = remote_policy.get("remote_id")
+                if not remote_id:
+                    continue
+
+                existing = await self.policy_repo.get_by_remote_id(remote_id)
+
+                policy_name = remote_policy.get("name") or f"synced-{remote_id}"
+                policy_config = remote_policy.get("config") or {}
 
                 if existing is None:
                     # Create new record
                     await self.policy_repo.create(
-                        name=remote_policy["name"],
-                        body=remote_policy["config"],
-                        remote_id=remote_policy["remote_id"],
+                        name=policy_name,
+                        body=policy_config,
+                        remote_id=remote_id,
                         provider_id=provider.id,
                     )
                     created += 1
                 else:
                     # Check if data changed (compare body only)
-                    if existing.body != remote_policy["config"]:
+                    if existing.body != policy_config:
                         await self.policy_repo.update(
                             existing.id if hasattr(existing, "id") else None,
-                            name=remote_policy["name"],
-                            body=remote_policy["config"],
+                            name=policy_name,
+                            body=policy_config,
                         )
                         updated += 1
                     else:
@@ -251,10 +292,36 @@ class PolicyService:
                 )
                 continue
 
-        # 4. Return report
+        # 5. Remove local policies whose remote_id no longer exists in cloud
+        deleted = 0
+        all_local = await self.policy_repo.list_all(only_active=False)
+        for local_policy in all_local:
+            if (
+                local_policy.remote_id
+                and local_policy.remote_id not in cloud_remote_ids
+            ):
+                # This policy was synced from cloud but no longer exists there
+                try:
+                    await self.policy_repo.soft_delete(local_policy.id)
+                    deleted += 1
+                    logger.info(
+                        "Soft-deleted local policy %s (remote_id=%s) — "
+                        "no longer exists in cloud",
+                        local_policy.id,
+                        local_policy.remote_id,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        "Error deleting orphaned policy %s: %s",
+                        local_policy.id,
+                        exc,
+                    )
+
+        # 6. Return report
         return {
             "created": created,
             "updated": updated,
             "unchanged": unchanged,
+            "deleted": deleted,
             "total_remote": len(cloud_policies),
         }

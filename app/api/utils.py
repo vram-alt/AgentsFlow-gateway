@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import logging
 import uuid
 from typing import Any
@@ -68,11 +69,28 @@ def internal_error_response(exc: Exception) -> JSONResponse:
     return JSONResponse(status_code=500, content=error_body.model_dump())
 
 
+def _try_parse_json(value: Any) -> Any:
+    """Attempt to parse a JSON string into a Python object.
+
+    Returns the parsed object if successful, otherwise returns the original value.
+    """
+    if isinstance(value, str):
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return value
+
+
 def serialize(obj: Any) -> Any:
     """Convert ORM/Pydantic object(s) to JSON-compatible format.
 
     Supports: Pydantic models (model_dump), SQLAlchemy ORM models (__dict__),
     sequences, and plain JSON-serializable values.
+
+    Special handling for PolicyModel:
+    - Parses JSON string in 'body' field to a dict
+    - Adds 'provider_name' field (defaults to 'portkey')
     """
     if isinstance(obj, list):
         return [serialize(item) for item in obj]
@@ -84,9 +102,25 @@ def serialize(obj: Any) -> Any:
         for key, value in obj.__dict__.items():
             if key.startswith("_"):
                 continue
+            # Skip relationship attributes to avoid lazy-load in async context
+            if key == "provider" or key == "policies":
+                continue
             if isinstance(value, datetime.datetime):
                 result[key] = value.isoformat()
+            elif key == "body" and isinstance(value, str):
+                # Parse JSON string body (PolicyModel stores body as JSON text)
+                result[key] = _try_parse_json(value)
+            elif key == "payload" and isinstance(value, str):
+                # Parse JSON string payload (LogEntryModel stores payload as JSON text)
+                result[key] = _try_parse_json(value)
             else:
                 result[key] = value
+
+        # Add provider_name for PolicyModel (frontend expects it)
+        table_name = getattr(obj.__table__, "name", "")
+        if table_name == "policies":
+            # Default to "portkey" — the only provider type currently supported
+            result.setdefault("provider_name", "portkey")
+
         return result
     return obj

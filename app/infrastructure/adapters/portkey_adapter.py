@@ -75,6 +75,24 @@ def _infer_provider_from_model(model: str) -> str:
     return "openai"
 
 
+def _parse_api_key(api_key: str) -> tuple[str, str | None]:
+    """Parse api_key field to extract Portkey API key and optional virtual key slug.
+
+    Supports two formats:
+    1. Plain Portkey API key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5"
+       -> returns (portkey_api_key, None)
+    2. Portkey API key with virtual key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5::test"
+       -> returns (portkey_api_key, "test")
+
+    The '::' separator is used because neither Portkey API keys nor
+    virtual key slugs contain this sequence.
+    """
+    if "::" in api_key:
+        parts = api_key.split("::", 1)
+        return parts[0], parts[1]
+    return api_key, None
+
+
 class PortkeyAdapter(GatewayProvider):
     """Adapter for the Portkey LLM provider."""
 
@@ -95,11 +113,18 @@ class PortkeyAdapter(GatewayProvider):
         self, prompt: UnifiedPrompt, api_key: str, base_url: str
     ) -> Union[UnifiedResponse, GatewayError]:
         try:
+            portkey_key, virtual_key = _parse_api_key(api_key)
             llm_provider = _infer_provider_from_model(prompt.model)
-            headers = self._build_headers(api_key, llm_provider=llm_provider)
+            headers = self._build_headers(
+                portkey_key, llm_provider=llm_provider, virtual_key=virtual_key
+            )
             headers["x-portkey-trace-id"] = prompt.trace_id
             if prompt.guardrail_ids:
-                headers["x-portkey-guardrails"] = json.dumps(prompt.guardrail_ids)
+                # Portkey guardrails are applied via x-portkey-config header
+                # with before_request_hooks containing guardrail slugs and deny:true
+                hooks = [{"id": gid, "deny": True} for gid in prompt.guardrail_ids]
+                config = {"before_request_hooks": hooks}
+                headers["x-portkey-config"] = json.dumps(config)
 
             body: dict[str, Any] = {
                 "model": prompt.model,
@@ -122,6 +147,18 @@ class PortkeyAdapter(GatewayProvider):
                     method="POST", url=url, headers=headers, json_body=body
                 )
             except httpx.HTTPStatusError as exc:
+                # Portkey guardrail blocked (HTTP 446)
+                if exc.response.status_code == 446:
+                    detail = self._extract_response_detail(exc.response)
+                    return UnifiedResponse(
+                        trace_id=prompt.trace_id,
+                        content=detail or "Request blocked by guardrail policy",
+                        model=prompt.model,
+                        usage=None,
+                        provider_raw=exc.response.json() if exc.response.text else {},
+                        guardrail_blocked=True,
+                    )
+                # Portkey guardrail warning (HTTP 246) — handled below after resp
                 # Demo fallback: if LLM provider returns 401 (no valid API key)
                 # AND DEMO_MODE is enabled, return a demo response so the system
                 # works end-to-end without a real LLM API key configured.
@@ -207,26 +244,32 @@ class PortkeyAdapter(GatewayProvider):
         self, config: dict, api_key: str, base_url: str
     ) -> Union[dict, GatewayError]:
         try:
-            headers = self._build_headers(api_key)
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails"
             resp = await self._execute_with_retry(
                 method="POST", url=url, headers=headers, json_body=config
             )
             data = resp.json()
-            return {"remote_id": data.get("id"), "raw_response": data}
+            remote_id = data.get("id") or data.get("slug") or data.get("_id")
+            return {"remote_id": remote_id, "raw_response": data}
         except Exception as exc:
             # Demo fallback: return simulated guardrail creation when
             # DEMO_MODE is enabled and the real provider rejects the request.
             if self._is_demo_mode():
                 demo_id = f"demo-gr-{uuid.uuid4().hex[:8]}"
-                return {"remote_id": demo_id, "raw_response": {"id": demo_id, "demo": True}}
+                return {
+                    "remote_id": demo_id,
+                    "raw_response": {"id": demo_id, "demo": True},
+                }
             return self._handle_error(exc, trace_id=str(uuid.uuid4()))
 
     async def update_guardrail(
         self, remote_id: str, config: dict, api_key: str, base_url: str
     ) -> Union[dict, GatewayError]:
         try:
-            headers = self._build_headers(api_key)
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails/{remote_id}"
             resp = await self._execute_with_retry(
                 method="PUT", url=url, headers=headers, json_body=config
@@ -236,14 +279,18 @@ class PortkeyAdapter(GatewayProvider):
         except Exception as exc:
             # Demo fallback: return simulated guardrail update
             if self._is_demo_mode():
-                return {"remote_id": remote_id, "raw_response": {"id": remote_id, "demo": True}}
+                return {
+                    "remote_id": remote_id,
+                    "raw_response": {"id": remote_id, "demo": True},
+                }
             return self._handle_error(exc, trace_id=str(uuid.uuid4()))
 
     async def delete_guardrail(
         self, remote_id: str, api_key: str, base_url: str
     ) -> Union[bool, GatewayError]:
         try:
-            headers = self._build_headers(api_key)
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails/{remote_id}"
             resp = await self._execute_with_retry(
                 method="DELETE", url=url, headers=headers
@@ -259,19 +306,27 @@ class PortkeyAdapter(GatewayProvider):
         self, api_key: str, base_url: str
     ) -> Union[list[dict], GatewayError]:
         try:
-            headers = self._build_headers(api_key)
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails"
             resp = await self._execute_with_retry(
                 method="GET", url=url, headers=headers
             )
-            data = resp.json()
+            raw = resp.json()
+            # Portkey returns {"object": "list", "total": N, "data": [...]}
+            if isinstance(raw, dict) and "data" in raw:
+                items = raw["data"]
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                items = []
             return [
                 {
-                    "remote_id": item.get("id"),
-                    "name": item.get("name"),
-                    "config": item.get("config"),
+                    "remote_id": item.get("id") or item.get("slug") or item.get("_id"),
+                    "name": item.get("name", ""),
+                    "config": item.get("checks") or item.get("config") or {},
                 }
-                for item in data
+                for item in items
             ]
         except Exception as exc:
             # Demo fallback: return empty list of guardrails
@@ -297,18 +352,26 @@ class PortkeyAdapter(GatewayProvider):
     # Internal methods
     # ------------------------------------------------------------------
     def _build_headers(
-        self, api_key: str, llm_provider: str = "openai"
+        self,
+        api_key: str,
+        llm_provider: str = "openai",
+        virtual_key: str | None = None,
     ) -> dict[str, str]:
         """Build the standard set of HTTP headers for the Portkey API.
 
-        The x-portkey-provider header is required by Portkey to route
-        requests to the correct underlying LLM provider (e.g., openai, anthropic).
+        If virtual_key is provided, uses x-portkey-virtual-key header
+        (Portkey routes to the correct provider via the virtual key config).
+        Otherwise, uses x-portkey-provider header for direct provider routing.
         """
-        return {
+        headers: dict[str, str] = {
             "x-portkey-api-key": api_key,
-            "x-portkey-provider": llm_provider,
             "Content-Type": "application/json",
         }
+        if virtual_key:
+            headers["x-portkey-virtual-key"] = virtual_key
+        else:
+            headers["x-portkey-provider"] = llm_provider
+        return headers
 
     def _get_http_client(self) -> httpx.AsyncClient:
         """Create or return the reusable httpx.AsyncClient."""

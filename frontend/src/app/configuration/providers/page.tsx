@@ -25,8 +25,14 @@ import {
     Key,
     AlertTriangle,
     Power,
+    Cloud,
+    HardDrive,
+    Info,
+    Lightbulb,
 } from "lucide-react";
 import { api, type Provider, type ProviderCreateRequest } from "@/lib/api-client";
+
+type ConnectionType = "cloud" | "selfhosted";
 
 export default function ProvidersPage() {
     const [providers, setProviders] = useState<Provider[]>([]);
@@ -34,7 +40,14 @@ export default function ProvidersPage() {
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingProvider, setEditingProvider] = useState<Provider | null>(null);
     const [deleteConfirm, setDeleteConfirm] = useState<number | null>(null);
-    const [formData, setFormData] = useState({ name: "", api_key: "", base_url: "" });
+    const [connectionType, setConnectionType] = useState<ConnectionType>("cloud");
+    const [formData, setFormData] = useState({
+        name: "",
+        portkey_api_key: "",
+        virtual_key: "",
+        provider_api_key: "",
+        base_url: "",
+    });
     const [saving, setSaving] = useState(false);
     const [error, setError] = useState<string | null>(null);
 
@@ -56,18 +69,44 @@ export default function ProvidersPage() {
 
     const openCreate = () => {
         setEditingProvider(null);
-        setFormData({ name: "", api_key: "", base_url: "" });
+        setConnectionType("cloud");
+        setFormData({
+            name: "",
+            portkey_api_key: "",
+            virtual_key: "",
+            provider_api_key: "",
+            base_url: "https://api.portkey.ai/v1",
+        });
         setError(null);
         setDialogOpen(true);
     };
 
     const openEdit = (provider: Provider) => {
         setEditingProvider(provider);
-        setFormData({
-            name: provider.name,
-            api_key: "",
-            base_url: provider.base_url,
-        });
+        // Detect connection type from existing api_key
+        const hasVirtualKey = provider.api_key?.includes("::");
+        const isCloud = provider.base_url?.includes("portkey.ai");
+
+        if (isCloud || hasVirtualKey) {
+            setConnectionType("cloud");
+            const parts = (provider.api_key || "").split("::");
+            setFormData({
+                name: provider.name,
+                portkey_api_key: "",  // Don't show existing key
+                virtual_key: parts[1] || "",
+                provider_api_key: "",
+                base_url: provider.base_url,
+            });
+        } else {
+            setConnectionType("selfhosted");
+            setFormData({
+                name: provider.name,
+                portkey_api_key: "",
+                virtual_key: "",
+                provider_api_key: "",  // Don't show existing key
+                base_url: provider.base_url,
+            });
+        }
         setError(null);
         setDialogOpen(true);
     };
@@ -76,17 +115,48 @@ export default function ProvidersPage() {
         setSaving(true);
         setError(null);
         try {
+            let finalApiKey: string;
+            let finalBaseUrl: string;
+
+            if (connectionType === "cloud") {
+                // Cloud mode: combine portkey_api_key and virtual_key
+                if (!editingProvider && !formData.portkey_api_key) {
+                    setError("Portkey API Key is required");
+                    setSaving(false);
+                    return;
+                }
+                finalApiKey = formData.portkey_api_key;
+                if (formData.virtual_key.trim()) {
+                    finalApiKey = `${formData.portkey_api_key}::${formData.virtual_key.trim()}`;
+                }
+                finalBaseUrl = formData.base_url || "https://api.portkey.ai/v1";
+            } else {
+                // Self-hosted mode: use provider API key directly
+                if (!editingProvider && !formData.provider_api_key) {
+                    setError("Provider API Key is required");
+                    setSaving(false);
+                    return;
+                }
+                finalApiKey = formData.provider_api_key;
+                finalBaseUrl = formData.base_url || "http://localhost:8787/v1";
+            }
+
             if (editingProvider) {
                 await api.updateProvider(editingProvider.id, {
                     name: formData.name || null,
-                    api_key: formData.api_key || null,
-                    base_url: formData.base_url || null,
+                    api_key: finalApiKey || null,
+                    base_url: finalBaseUrl || null,
                 });
             } else {
+                if (!formData.name) {
+                    setError("Name is required");
+                    setSaving(false);
+                    return;
+                }
                 await api.createProvider({
                     name: formData.name,
-                    api_key: formData.api_key,
-                    base_url: formData.base_url,
+                    api_key: finalApiKey,
+                    base_url: finalBaseUrl,
                 });
             }
             setDialogOpen(false);
@@ -102,7 +172,7 @@ export default function ProvidersPage() {
         try {
             await api.deleteProvider(id);
             setDeleteConfirm(null);
-            fetchProviders();
+            setProviders((prev) => prev.filter((p) => p.id !== id));
         } catch {
             // silently fail
         }
@@ -115,6 +185,21 @@ export default function ProvidersPage() {
         } catch {
             // silently fail
         }
+    };
+
+    /** Detect if a provider uses cloud or self-hosted mode */
+    const getProviderType = (provider: Provider): "cloud" | "selfhosted" => {
+        if (provider.base_url?.includes("portkey.ai")) return "cloud";
+        if (provider.api_key?.includes("::")) return "cloud";
+        return "selfhosted";
+    };
+
+    /** Extract virtual key slug from api_key if present */
+    const getVirtualKey = (provider: Provider): string | null => {
+        if (provider.api_key?.includes("::")) {
+            return provider.api_key.split("::")[1] || null;
+        }
+        return null;
     };
 
     return (
@@ -154,86 +239,102 @@ export default function ProvidersPage() {
                     </div>
                 )}
                 {!loading &&
-                    providers.map((provider) => (
-                        <Card
-                            key={provider.id}
-                            className={`transition-colors group ${
-                                provider.is_active
-                                    ? "hover:border-primary/30"
-                                    : "opacity-60 border-dashed"
-                            }`}
-                        >
-                            <CardHeader className="pb-3">
-                                <div className="flex items-start justify-between">
-                                    <div className="flex items-center gap-3">
-                                        <div className={`p-2 rounded-lg ${provider.is_active ? "bg-primary/10" : "bg-muted"}`}>
-                                            <Zap className={`w-5 h-5 ${provider.is_active ? "text-primary" : "text-muted-foreground"}`} />
+                    providers.map((provider) => {
+                        const provType = getProviderType(provider);
+                        const vk = getVirtualKey(provider);
+                        return (
+                            <Card
+                                key={provider.id}
+                                className={`transition-colors group ${provider.is_active
+                                        ? "hover:border-primary/30"
+                                        : "opacity-60 border-dashed"
+                                    }`}
+                            >
+                                <CardHeader className="pb-3">
+                                    <div className="flex items-start justify-between">
+                                        <div className="flex items-center gap-3">
+                                            <div className={`p-2 rounded-lg ${provider.is_active ? "bg-primary/10" : "bg-muted"}`}>
+                                                <Zap className={`w-5 h-5 ${provider.is_active ? "text-primary" : "text-muted-foreground"}`} />
+                                            </div>
+                                            <div>
+                                                <CardTitle className={`text-base ${!provider.is_active ? "text-muted-foreground" : ""}`}>
+                                                    {provider.name}
+                                                </CardTitle>
+                                                <div className="flex items-center gap-1.5 mt-1">
+                                                    <Badge
+                                                        variant={provider.is_active ? "success" : "secondary"}
+                                                    >
+                                                        {provider.is_active ? "Active" : "Inactive"}
+                                                    </Badge>
+                                                    <Badge variant="outline" className="text-[10px]">
+                                                        {provType === "cloud" ? (
+                                                            <><Cloud className="w-3 h-3 mr-1" />Cloud</>
+                                                        ) : (
+                                                            <><HardDrive className="w-3 h-3 mr-1" />Self-hosted</>
+                                                        )}
+                                                    </Badge>
+                                                </div>
+                                            </div>
                                         </div>
-                                        <div>
-                                            <CardTitle className={`text-base ${!provider.is_active ? "text-muted-foreground" : ""}`}>
-                                                {provider.name}
-                                            </CardTitle>
-                                            <Badge
-                                                variant={provider.is_active ? "success" : "secondary"}
-                                                className="mt-1"
+                                        <div className="flex gap-1">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className={`h-8 w-8 ${provider.is_active
+                                                        ? "text-green-600 hover:text-red-600"
+                                                        : "text-muted-foreground hover:text-green-600"
+                                                    }`}
+                                                onClick={() => handleToggle(provider.id)}
+                                                title={provider.is_active ? "Deactivate provider" : "Activate provider"}
                                             >
-                                                {provider.is_active ? "Active" : "Inactive"}
-                                            </Badge>
+                                                <Power className="w-4 h-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
+                                                onClick={() => openEdit(provider)}
+                                            >
+                                                <Pencil className="w-3.5 h-3.5" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                className="h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
+                                                onClick={() => setDeleteConfirm(provider.id)}
+                                            >
+                                                <Trash2 className="w-3.5 h-3.5" />
+                                            </Button>
                                         </div>
                                     </div>
-                                    <div className="flex gap-1">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className={`h-8 w-8 ${
-                                                provider.is_active
-                                                    ? "text-green-600 hover:text-red-600"
-                                                    : "text-muted-foreground hover:text-green-600"
-                                            }`}
-                                            onClick={() => handleToggle(provider.id)}
-                                            title={provider.is_active ? "Deactivate provider" : "Activate provider"}
-                                        >
-                                            <Power className="w-4 h-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => openEdit(provider)}
-                                        >
-                                            <Pencil className="w-3.5 h-3.5" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            className="h-8 w-8 text-destructive opacity-0 group-hover:opacity-100 transition-opacity"
-                                            onClick={() => setDeleteConfirm(provider.id)}
-                                        >
-                                            <Trash2 className="w-3.5 h-3.5" />
-                                        </Button>
+                                </CardHeader>
+                                <CardContent className="space-y-2">
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Globe className="w-3.5 h-3.5" />
+                                        <span className="truncate">{provider.base_url}</span>
                                     </div>
-                                </div>
-                            </CardHeader>
-                            <CardContent className="space-y-2">
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Globe className="w-3.5 h-3.5" />
-                                    <span className="truncate">{provider.base_url}</span>
-                                </div>
-                                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                    <Key className="w-3.5 h-3.5" />
-                                    <span>••••••••{provider.api_key?.slice(-4) || "••••"}</span>
-                                </div>
-                                <div className="text-xs text-muted-foreground pt-2">
-                                    Created {new Date(provider.created_at).toLocaleDateString()}
-                                </div>
-                            </CardContent>
-                        </Card>
-                    ))}
+                                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                        <Key className="w-3.5 h-3.5" />
+                                        <span>••••••••{provider.api_key?.split("::")[0]?.slice(-4) || "••••"}</span>
+                                    </div>
+                                    {vk && (
+                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                                            <Cloud className="w-3.5 h-3.5" />
+                                            <span>Virtual Key: <code className="text-xs bg-secondary px-1 py-0.5 rounded">{vk}</code></span>
+                                        </div>
+                                    )}
+                                    <div className="text-xs text-muted-foreground pt-2">
+                                        Created {new Date(provider.created_at).toLocaleDateString()}
+                                    </div>
+                                </CardContent>
+                            </Card>
+                        );
+                    })}
             </div>
 
             {/* Create/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent>
+                <DialogContent className="max-w-lg">
                     <DialogHeader>
                         <DialogTitle>
                             {editingProvider ? "Edit Provider" : "Add Provider"}
@@ -251,6 +352,57 @@ export default function ProvidersPage() {
                                 {error}
                             </div>
                         )}
+
+                        {/* Connection Type Selector */}
+                        <div className="space-y-2">
+                            <label className="text-sm font-medium">Connection Type</label>
+                            <div className="grid grid-cols-2 gap-2">
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setConnectionType("cloud");
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            base_url: "https://api.portkey.ai/v1",
+                                        }));
+                                    }}
+                                    className={`flex items-center gap-2 p-3 rounded-lg border text-left transition-colors cursor-pointer ${connectionType === "cloud"
+                                            ? "border-primary bg-primary/5 text-primary"
+                                            : "border-border hover:border-primary/30"
+                                        }`}
+                                >
+                                    <Cloud className="w-5 h-5 shrink-0" />
+                                    <div>
+                                        <div className="text-sm font-medium">Portkey Cloud</div>
+                                        <div className="text-[10px] text-muted-foreground">SaaS — api.portkey.ai</div>
+                                    </div>
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => {
+                                        setConnectionType("selfhosted");
+                                        setFormData(prev => ({
+                                            ...prev,
+                                            base_url: prev.base_url === "https://api.portkey.ai/v1"
+                                                ? "http://localhost:8787/v1"
+                                                : prev.base_url,
+                                        }));
+                                    }}
+                                    className={`flex items-center gap-2 p-3 rounded-lg border text-left transition-colors cursor-pointer ${connectionType === "selfhosted"
+                                            ? "border-primary bg-primary/5 text-primary"
+                                            : "border-border hover:border-primary/30"
+                                        }`}
+                                >
+                                    <HardDrive className="w-5 h-5 shrink-0" />
+                                    <div>
+                                        <div className="text-sm font-medium">Self-hosted</div>
+                                        <div className="text-[10px] text-muted-foreground">Docker / Local gateway</div>
+                                    </div>
+                                </button>
+                            </div>
+                        </div>
+
+                        {/* Name */}
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Name</label>
                             <Input
@@ -259,21 +411,62 @@ export default function ProvidersPage() {
                                 placeholder="e.g. portkey"
                             />
                         </div>
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">API Key</label>
-                            <Input
-                                type="password"
-                                value={formData.api_key}
-                                onChange={(e) => setFormData({ ...formData, api_key: e.target.value })}
-                                placeholder={editingProvider ? "Leave empty to keep current" : "sk-..."}
-                            />
-                        </div>
+
+                        {/* Cloud Mode Fields */}
+                        {connectionType === "cloud" && (
+                            <>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Portkey API Key</label>
+                                    <Input
+                                        type="password"
+                                        value={formData.portkey_api_key}
+                                        onChange={(e) => setFormData({ ...formData, portkey_api_key: e.target.value })}
+                                        placeholder={editingProvider ? "Leave empty to keep current" : "Your Portkey API key"}
+                                    />
+                                    <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                                        <Info className="w-3 h-3 mt-0.5 shrink-0" />
+                                        Found in your Portkey dashboard under API Keys.
+                                    </p>
+                                </div>
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Virtual Key Slug</label>
+                                    <Input
+                                        value={formData.virtual_key}
+                                        onChange={(e) => setFormData({ ...formData, virtual_key: e.target.value })}
+                                        placeholder="e.g. test"
+                                    />
+                                    <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                                        <Info className="w-3 h-3 mt-0.5 shrink-0" />
+                                        Enter the slug of your Virtual Key from Portkey dashboard (Portkey → AI Providers). This is required for Portkey Cloud to route requests to the correct LLM provider.
+                                    </p>
+                                </div>
+                            </>
+                        )}
+
+                        {/* Self-hosted Mode Fields */}
+                        {connectionType === "selfhosted" && (
+                            <div className="space-y-2">
+                                <label className="text-sm font-medium">Provider API Key</label>
+                                <Input
+                                    type="password"
+                                    value={formData.provider_api_key}
+                                    onChange={(e) => setFormData({ ...formData, provider_api_key: e.target.value })}
+                                    placeholder={editingProvider ? "Leave empty to keep current" : "Direct LLM provider API key"}
+                                />
+                                <p className="text-[11px] text-muted-foreground flex items-start gap-1">
+                                    <Info className="w-3 h-3 mt-0.5 shrink-0" />
+                                    The actual API key for your LLM provider (e.g. OpenAI, Google). Virtual keys are not needed for self-hosted Portkey Gateway.
+                                </p>
+                            </div>
+                        )}
+
+                        {/* Base URL */}
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Base URL</label>
                             <Input
                                 value={formData.base_url}
                                 onChange={(e) => setFormData({ ...formData, base_url: e.target.value })}
-                                placeholder="https://api.portkey.ai/v1"
+                                placeholder={connectionType === "cloud" ? "https://api.portkey.ai/v1" : "http://localhost:8787/v1"}
                             />
                         </div>
                     </div>
@@ -288,6 +481,32 @@ export default function ProvidersPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Quick Tips */}
+            <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm text-primary">Quick Tips</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="flex items-start gap-2">
+                        <Cloud className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Portkey Cloud requires a Portkey API Key and a Virtual Key slug from your Portkey dashboard.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <HardDrive className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Self-hosted mode uses the LLM provider API key directly (no Virtual Key needed).</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Power className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Toggle the power icon to activate or deactivate a provider without deleting it.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Key className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>The provider name is used in Sandbox to select which LLM service to route requests through.</p>
+                    </div>
+                </div>
+            </div>
 
             {/* Delete Confirmation */}
             <Dialog open={deleteConfirm !== null} onOpenChange={() => setDeleteConfirm(null)}>

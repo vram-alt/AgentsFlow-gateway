@@ -27,8 +27,13 @@ import {
     Eye,
     Power,
     X,
+    Cloud,
+    HardDrive,
+    Lightbulb,
+    Plus as PlusIcon,
+    Trash2 as TrashIcon,
 } from "lucide-react";
-import { api, ApiError, type Policy } from "@/lib/api-client";
+import { api, ApiError, type Policy, type Provider } from "@/lib/api-client";
 
 /** Extract a human-readable message from any caught error. */
 function humanError(err: unknown): string {
@@ -45,6 +50,7 @@ function humanError(err: unknown): string {
 
 export default function PoliciesPage() {
     const [policies, setPolicies] = useState<Policy[]>([]);
+    const [providers, setProviders] = useState<{name: string, is_active: boolean}[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
@@ -60,6 +66,7 @@ export default function PoliciesPage() {
     const [pageError, setPageError] = useState<string | null>(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
+    const [isCloudMode, setIsCloudMode] = useState(true);
 
     const fetchPolicies = async () => {
         setLoading(true);
@@ -67,6 +74,16 @@ export default function PoliciesPage() {
         try {
             const data = await api.listPolicies();
             setPolicies(Array.isArray(data) ? data : []);
+            
+            const providersData = await api.listProviders();
+            setProviders(Array.isArray(providersData) ? providersData : []);
+            
+            // Detect if using Portkey Cloud or Self-hosted
+            const activeProviders = (Array.isArray(providersData) ? providersData : []).filter((p: Provider) => p.is_active);
+            const hasCloudProvider = activeProviders.some((p: Provider) => 
+                p.base_url?.includes("portkey.ai") || p.api_key?.includes("::")
+            );
+            setIsCloudMode(hasCloudProvider);
         } catch (err: unknown) {
             setPolicies([]);
             setPageError(humanError(err));
@@ -81,7 +98,7 @@ export default function PoliciesPage() {
 
     const openCreate = () => {
         setEditingPolicy(null);
-        setFormData({ name: "", body: '{\n  "checks": [],\n  "actions": [\n    {\n      "type": "block",\n      "message": "Request blocked by guardrail"\n    }\n  ]\n}', provider_name: "portkey" });
+        setFormData({ name: "", body: '{\n  "checks": [\n    {\n      "id": "default.regexMatch",\n      "parameters": {\n        "rule": "block-word",\n        "pattern": "badword"\n      }\n    }\n  ],\n  "actions": {\n    "onFail": "block",\n    "onPass": "allow"\n  }\n}', provider_name: "portkey" });
         setError(null);
         setDialogOpen(true);
     };
@@ -156,6 +173,12 @@ export default function PoliciesPage() {
         }
     };
 
+    // Cloud mode: show only cloud-synced policies (with remote_id)
+    // Self-hosted mode: show only local policies (without remote_id)
+    const displayedPolicies = isCloudMode
+        ? policies.filter((p) => !!p.remote_id)
+        : policies.filter((p) => !p.remote_id);
+
     const handleSync = async () => {
         setSyncLoading(true);
         setPageError(null);
@@ -175,17 +198,19 @@ export default function PoliciesPage() {
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-2xl font-bold tracking-tight">Policies</h1>
-                    <p className="text-muted-foreground">Manage guardrail and security policies</p>
+                    <p className="text-muted-foreground">Manage guardrail and security policies. Policies are synced with your Portkey cloud account.</p>
                 </div>
                 <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={handleSync} disabled={syncLoading}>
-                        {syncLoading ? (
-                            <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                        ) : (
-                            <CloudDownload className="w-4 h-4 mr-2" />
-                        )}
-                        Sync from Cloud
-                    </Button>
+                    {isCloudMode && (
+                        <Button variant="outline" size="sm" onClick={handleSync} disabled={syncLoading}>
+                            {syncLoading ? (
+                                <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                            ) : (
+                                <CloudDownload className="w-4 h-4 mr-2" />
+                            )}
+                            Sync from Cloud
+                        </Button>
+                    )}
                     <Button variant="outline" size="sm" onClick={fetchPolicies} disabled={loading}>
                         <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
                         Refresh
@@ -211,6 +236,27 @@ export default function PoliciesPage() {
                 </div>
             )}
 
+            {/* Mode Toggle */}
+            <div className="flex items-center gap-4 p-3 rounded-lg border border-border bg-secondary/30">
+                <button
+                    onClick={() => setIsCloudMode(false)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer ${!isCloudMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                    <HardDrive className="w-4 h-4" />
+                    Local
+                </button>
+                <button
+                    onClick={() => setIsCloudMode(true)}
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer ${isCloudMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                >
+                    <Cloud className="w-4 h-4" />
+                    Cloud
+                </button>
+                <span className="text-xs text-muted-foreground ml-2">
+                    {isCloudMode ? "Policies synced with Portkey Cloud" : "Policies stored locally only"}
+                </span>
+            </div>
+
             {/* Policies Table */}
             <Card>
                 <CardContent className="p-0">
@@ -234,11 +280,12 @@ export default function PoliciesPage() {
                                         </td>
                                     </tr>
                                 )}
-                                {!loading && policies.length === 0 && (
+                                {!loading && displayedPolicies.length === 0 && (
                                     <tr>
                                         <td colSpan={6} className="p-8 text-center text-muted-foreground">
                                             <Shield className="w-8 h-8 mx-auto mb-2 opacity-30" />
                                             <p>No policies configured</p>
+                                            <p className="text-xs mt-1 max-w-sm mx-auto">Policies (guardrails) filter and validate AI requests and responses. Create one below or sync existing guardrails from your Portkey cloud account.</p>
                                             <Button size="sm" className="mt-3" onClick={openCreate}>
                                                 <Plus className="w-4 h-4 mr-2" />
                                                 Create policy
@@ -247,7 +294,7 @@ export default function PoliciesPage() {
                                     </tr>
                                 )}
                                 {!loading &&
-                                    policies.map((policy) => (
+                                    displayedPolicies.map((policy) => (
                                         <tr
                                             key={policy.id}
                                             className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${!policy.is_active ? "opacity-60" : ""}`}
@@ -366,12 +413,20 @@ export default function PoliciesPage() {
                                         setFormData({ ...formData, provider_name: e.target.value })
                                     }
                                 >
-                                    <option value="portkey">Portkey</option>
+                                    {providers.map((p) => (
+                                        <option key={p.name} value={p.name}>
+                                            {p.name} {p.is_active ? "" : "(Inactive)"}
+                                        </option>
+                                    ))}
+                                    {providers.length === 0 && (
+                                        <option value="portkey">Portkey</option>
+                                    )}
                                 </Select>
                             </div>
                         )}
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Policy Body (JSON)</label>
+                            <p className="text-[11px] text-muted-foreground">Portkey guardrail config: "checks" define validation rules, "actions" define what happens on pass/fail. See Portkey docs for available check IDs.</p>
                             <Textarea
                                 value={formData.body}
                                 onChange={(e) => setFormData({ ...formData, body: e.target.value })}
@@ -391,6 +446,55 @@ export default function PoliciesPage() {
                     </DialogFooter>
                 </DialogContent>
             </Dialog>
+
+            {/* Quick Tips */}
+            <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm text-primary">Quick Tips</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {isCloudMode ? (
+                        <>
+                            <div className="flex items-start gap-2">
+                                <Cloud className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Cloud Mode:</strong> Policies are guardrails synced with your Portkey Cloud account.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Plus className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Create:</strong> Saves the guardrail to Portkey Cloud and to the local database.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Trash2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Delete:</strong> Removes from both Portkey Cloud and the local database.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <CloudDownload className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Sync from Cloud:</strong> Pulls guardrails from Portkey, creates missing ones locally, removes orphaned.</p>
+                            </div>
+                        </>
+                    ) : (
+                        <>
+                            <div className="flex items-start gap-2">
+                                <HardDrive className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Local Mode:</strong> Policies are stored only in the local database. No cloud sync.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Plus className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Create:</strong> Saves the policy to the local database only.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Trash2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Delete:</strong> Removes from the local database only.</p>
+                            </div>
+                            <div className="flex items-start gap-2">
+                                <Shield className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                                <p><strong>Use case:</strong> Self-hosted Portkey Gateway or offline environments.</p>
+                            </div>
+                        </>
+                    )}
+                </div>
+            </div>
 
             {/* Delete Confirmation */}
             <Dialog open={deleteConfirm !== null} onOpenChange={() => setDeleteConfirm(null)}>

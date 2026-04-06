@@ -308,7 +308,7 @@ class LogRepository:
         [YEL] ORDER BY id for deterministic pagination.
         """
         stmt = (
-            select(LogEntryModel).order_by(LogEntryModel.id).limit(limit).offset(offset)
+            select(LogEntryModel).order_by(LogEntryModel.id.desc()).limit(limit).offset(offset)
         )
         result = await self._session.execute(stmt)
         return result.scalars().all()
@@ -320,7 +320,7 @@ class LogRepository:
         stmt = (
             select(LogEntryModel)
             .where(LogEntryModel.event_type == event_type)
-            .order_by(LogEntryModel.id)
+            .order_by(LogEntryModel.id.desc())
             .limit(limit)
             .offset(offset)
         )

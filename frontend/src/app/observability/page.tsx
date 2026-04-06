@@ -19,6 +19,7 @@ import {
     Loader2,
     FileText,
     AlertTriangle,
+    Lightbulb,
 } from "lucide-react";
 import { api, ApiError, type LogEntry } from "@/lib/api-client";
 
@@ -208,7 +209,7 @@ export default function ObservabilityPage() {
                         <table className="w-full text-sm">
                             <thead>
                                 <tr className="border-b border-border">
-                                    <th className="text-left p-4 text-muted-foreground font-medium">ID</th>
+                                    <th className="text-left p-4 text-muted-foreground font-medium">#</th>
                                     <th className="text-left p-4 text-muted-foreground font-medium">Event Type</th>
                                     <th className="text-left p-4 text-muted-foreground font-medium">Trace ID</th>
                                     <th className="text-left p-4 text-muted-foreground font-medium">Timestamp</th>
@@ -232,12 +233,16 @@ export default function ObservabilityPage() {
                                     </tr>
                                 )}
                                 {!loading &&
-                                    logs.map((log) => (
+                                    logs.map((log, index) => {
+                                        const rowNum = page * pageSize + index + 1;
+                                        const payload = typeof log.payload === 'string' ? JSON.parse(log.payload) : (log.payload || {});
+                                        const isBlocked = payload?.response?.guardrail_blocked === true;
+                                        return (
                                         <tr
                                             key={log.id}
-                                            className="border-b border-border/50 hover:bg-secondary/30 transition-colors"
+                                            className={`border-b border-border/50 hover:bg-secondary/30 transition-colors ${isBlocked ? "bg-destructive/5" : ""}`}
                                         >
-                                            <td className="p-4 font-mono text-xs">{log.id}</td>
+                                            <td className="p-4 font-mono text-xs">{rowNum}</td>
                                             <td className="p-4">
                                                 <span
                                                     className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${eventTypeColor[log.event_type] || "bg-secondary text-foreground"
@@ -245,6 +250,11 @@ export default function ObservabilityPage() {
                                                 >
                                                     {log.event_type}
                                                 </span>
+                                                {isBlocked && (
+                                                    <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-destructive/20 text-destructive">
+                                                        🚫 Blocked
+                                                    </span>
+                                                )}
                                             </td>
                                             <td className="p-4">
                                                 <code className="text-xs font-mono text-muted-foreground">
@@ -284,7 +294,8 @@ export default function ObservabilityPage() {
                                                 </div>
                                             </td>
                                         </tr>
-                                    ))}
+                                        );
+                                    })}
                             </tbody>
                         </table>
                     </div>
@@ -315,6 +326,32 @@ export default function ObservabilityPage() {
                     </div>
                 </CardContent>
             </Card>
+
+            {/* Quick Tips */}
+            <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm text-primary">Quick Tips</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                    <div className="flex items-start gap-2">
+                        <Search className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Use the search bar to find specific requests, or filter by event type (Chat Request, Error, etc.)</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Eye className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Click the eye icon to inspect the full request/response payload and guardrail details.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Replay button re-sends a past request to test if the result has changed.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Download className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p>Export CSV downloads all logs as a spreadsheet for external analysis or reporting.</p>
+                    </div>
+                </div>
+            </div>
 
             {/* Detail Modal */}
             {selectedLog && (

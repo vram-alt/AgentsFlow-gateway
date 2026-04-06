@@ -19,8 +19,11 @@ import {
     Terminal,
     MessageSquare,
     Trash2,
+    X,
+    Info,
+    Lightbulb,
 } from "lucide-react";
-import { api, type MessageItem, type ChatResponse, type TesterProxyResponse } from "@/lib/api-client";
+import { api, type MessageItem, type ChatResponse, type TesterProxyResponse, type Provider, type Policy } from "@/lib/api-client";
 
 interface ChatMessage {
     role: "user" | "assistant" | "system";
@@ -28,6 +31,7 @@ interface ChatMessage {
     timestamp: Date;
     usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null;
     trace_id?: string;
+    guardrail_blocked?: boolean;
 }
 
 export default function SandboxPage() {
@@ -66,7 +70,7 @@ export default function SandboxPage() {
 function ChatTab() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
-    const [model, setModel] = useState("gpt-4o-mini");
+    const [model, setModel] = useState("gemma-3-12b-it");
     const [provider, setProvider] = useState("portkey");
     const [temperature, setTemperature] = useState("0.7");
     const [maxTokens, setMaxTokens] = useState("1024");
@@ -74,9 +78,45 @@ function ChatTab() {
     const [copied, setCopied] = useState<string | null>(null);
     const messagesEndRef = useRef<HTMLDivElement>(null);
 
+    // Dynamic providers and policies
+    const [providers, setProviders] = useState<Provider[]>([]);
+    const [policies, setPolicies] = useState<Policy[]>([]);
+    const [selectedGuardrails, setSelectedGuardrails] = useState<string[]>([]);
+
     useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        // Load active providers
+        api.listProviders()
+            .then((data) => {
+                const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
+                setProviders(active);
+                if (active.length > 0 && !active.find((p) => p.name === provider)) {
+                    setProvider(active[0].name);
+                }
+            })
+            .catch(() => setProviders([]));
+
+        // Load active policies (guardrails)
+        api.listPolicies()
+            .then((data) => {
+                const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
+                setPolicies(active);
+            })
+            .catch(() => setPolicies([]));
+    }, []);
+
+    useEffect(() => {
+        if (messages.length > 0) {
+            messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+        }
     }, [messages]);
+
+    const toggleGuardrail = (remoteId: string) => {
+        setSelectedGuardrails((prev) =>
+            prev.includes(remoteId)
+                ? prev.filter((id) => id !== remoteId)
+                : [...prev, remoteId]
+        );
+    };
 
     const sendMessage = async () => {
         if (!input.trim() || loading) return;
@@ -102,14 +142,28 @@ function ChatTab() {
                 provider_name: provider,
                 temperature: parseFloat(temperature) || null,
                 max_tokens: parseInt(maxTokens) || null,
+                guardrail_ids: selectedGuardrails.length > 0 ? selectedGuardrails : undefined,
             });
+
+            // Build blocked message with guardrail names
+            let blockedContent = "";
+            if (response.guardrail_blocked) {
+                const appliedIds = selectedGuardrails;
+                const appliedNames = appliedIds
+                    .map(id => policies.find(p => (p.remote_id || p.name) === id)?.name || id)
+                    .join(", ");
+                blockedContent = `Request blocked by guardrail policy.\n\nBlocked by: ${appliedNames || "Unknown policy"}\n\nThe message did not pass the security checks defined in the active guardrail(s).`;
+            }
 
             const assistantMsg: ChatMessage = {
                 role: "assistant",
-                content: response.content,
+                content: response.guardrail_blocked
+                    ? blockedContent
+                    : response.content,
                 timestamp: new Date(),
                 usage: response.usage as ChatMessage["usage"],
                 trace_id: response.trace_id,
+                guardrail_blocked: response.guardrail_blocked,
             };
             setMessages((prev) => [...prev, assistantMsg]);
         } catch (err) {
@@ -131,6 +185,7 @@ function ChatTab() {
     };
 
     return (
+        <>
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
             {/* Settings Panel */}
             <Card className="lg:col-span-1">
@@ -141,16 +196,25 @@ function ChatTab() {
                     <div className="space-y-2">
                         <label className="text-sm text-muted-foreground">Provider</label>
                         <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                            <option value="portkey">Portkey</option>
+                            {providers.length === 0 && (
+                                <option value="portkey">Portkey (default)</option>
+                            )}
+                            {providers.map((p) => (
+                                <option key={p.id} value={p.name}>
+                                    {p.name}
+                                </option>
+                            ))}
                         </Select>
+
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-muted-foreground">Model</label>
                         <Input
                             value={model}
                             onChange={(e) => setModel(e.target.value)}
-                            placeholder="gpt-4o-mini"
+                            placeholder="gemma-3-12b-it"
                         />
+
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-muted-foreground">Temperature</label>
@@ -162,6 +226,7 @@ function ChatTab() {
                             value={temperature}
                             onChange={(e) => setTemperature(e.target.value)}
                         />
+
                     </div>
                     <div className="space-y-2">
                         <label className="text-sm text-muted-foreground">Max Tokens</label>
@@ -172,7 +237,60 @@ function ChatTab() {
                             value={maxTokens}
                             onChange={(e) => setMaxTokens(e.target.value)}
                         />
+
                     </div>
+
+                    {/* Guardrail Policies */}
+                    {policies.length > 0 && (
+                        <div className="space-y-3">
+                            <label className="text-sm text-muted-foreground flex justify-between items-center">
+                                Guardrails
+                                {selectedGuardrails.length > 0 && (
+                                    <span className="text-xs text-primary">{selectedGuardrails.length} active</span>
+                                )}
+                            </label>
+
+                            <Select
+                                value=""
+                                onChange={(e) => {
+                                    if (e.target.value) {
+                                        if (!selectedGuardrails.includes(e.target.value)) {
+                                            toggleGuardrail(e.target.value);
+                                        }
+                                    }
+                                }}
+                            >
+                                <option value="" disabled>Add a guardrail...</option>
+                                {policies.filter(p => !selectedGuardrails.includes(p.remote_id || p.name)).map(p => (
+                                    <option key={p.id} value={p.remote_id || p.name}>{p.name}</option>
+                                ))}
+                            </Select>
+
+
+
+                            {selectedGuardrails.length > 0 && (
+                                <div className="flex flex-wrap gap-2 mt-2">
+                                    {selectedGuardrails.map(id => {
+                                        const policy = policies.find(p => (p.remote_id || p.name) === id);
+                                        if (!policy) return null;
+                                        return (
+                                            <Badge
+                                                key={id}
+                                                variant="secondary"
+                                                className="flex items-center gap-1 cursor-pointer hover:bg-destructive/10 hover:text-destructive transition-colors py-1 px-2"
+                                                onClick={() => toggleGuardrail(id)}
+                                                title="Click to remove"
+                                            >
+                                                {policy.name}
+                                                <X className="w-3 h-3 ml-1 opacity-50" />
+                                            </Badge>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
+                    )}
+
                     <Button
                         variant="outline"
                         size="sm"
@@ -182,16 +300,21 @@ function ChatTab() {
                         <Trash2 className="w-4 h-4 mr-2" />
                         Clear Chat
                     </Button>
+
                 </CardContent>
             </Card>
 
             {/* Chat Area */}
-            <Card className="lg:col-span-3 flex flex-col h-[calc(100vh-16rem)]">
+            <Card className="lg:col-span-3 flex flex-col h-[calc(100vh-14rem)]">
                 <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
                     {messages.length === 0 && (
                         <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
                             <Bot className="w-12 h-12 mb-4 opacity-30" />
-                            <p className="text-sm">Send a message to start the conversation</p>
+                            <p className="text-sm font-medium">Send a message to start the conversation</p>
+                            <p className="text-xs mt-2 max-w-md text-center">
+                                Your messages are sent through the AI Gateway to the selected LLM provider.
+                                Each response includes a trace ID for debugging in the Observability tab.
+                            </p>
                         </div>
                     )}
                     {messages.map((msg, i) => (
@@ -206,10 +329,20 @@ function ChatTab() {
                             )}
                             <div
                                 className={`max-w-[80%] rounded-xl p-4 ${msg.role === "user"
-                                        ? "bg-primary text-primary-foreground"
+                                    ? "bg-primary text-primary-foreground"
+                                    : msg.guardrail_blocked
+                                        ? "bg-destructive/10 border border-destructive/30"
                                         : "bg-secondary"
                                     }`}
                             >
+                                {msg.guardrail_blocked && (
+                                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-destructive/30">
+                                        <div className="w-5 h-5 rounded-full bg-destructive/20 flex items-center justify-center">
+                                            <X className="w-3 h-3 text-destructive" />
+                                        </div>
+                                        <span className="text-xs font-semibold uppercase tracking-wider text-destructive">Guardrail Blocked</span>
+                                    </div>
+                                )}
                                 <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
                                 <div className="flex items-center gap-2 mt-2">
                                     <span className="text-[10px] opacity-60">
@@ -284,19 +417,61 @@ function ChatTab() {
                 </div>
             </Card>
         </div>
+
+        {/* Quick Tips — visible when scrolling below the chat area */}
+        <div className="mt-6 p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 mb-3">
+                <Lightbulb className="w-4 h-4 text-primary" />
+                <span className="font-medium text-sm text-primary">Quick Tips</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-3">
+                    <div className="flex items-start gap-2">
+                        <Bot className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Provider</strong> — select which LLM service to use. Configure in <a href="/configuration/providers" className="text-primary underline">Providers</a></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Model</strong> — exact model name, e.g. <code className="bg-secondary px-1 rounded">gemma-3-12b-it</code></p>
+                    </div>
+                </div>
+                <div className="space-y-3">
+                    <div className="flex items-start gap-2">
+                        <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Temperature</strong> — randomness: 0 = precise, 1 = creative, 2 = random</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Max Tokens</strong> — limits response length. Higher = longer but costlier</p>
+                    </div>
+                </div>
+                <div className="space-y-3">
+                    <div className="flex items-start gap-2">
+                        <X className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Guardrails</strong> — filter harmful content. Manage in <a href="/configuration/policies" className="text-primary underline">Policies</a></p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Copy className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Trace ID</strong> — unique ID per response, find in <a href="/observability" className="text-primary underline">Observability</a></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        </>
     );
 }
 
 // ─── JSON Tester Tab ────────────────────────────────────────────────────
 
 function JsonTesterTab() {
+    const [providers, setProviders] = useState<Provider[]>([]);
     const [provider, setProvider] = useState("portkey");
     const [method, setMethod] = useState("POST");
     const [path, setPath] = useState("/chat/completions");
     const [body, setBody] = useState(
         JSON.stringify(
             {
-                model: "gpt-4o-mini",
+                model: "gemma-3-12b-it",
                 messages: [{ role: "user", content: "Hello!" }],
                 temperature: 0.7,
             },
@@ -308,6 +483,18 @@ function JsonTesterTab() {
     const [response, setResponse] = useState<TesterProxyResponse | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [loading, setLoading] = useState(false);
+
+    useEffect(() => {
+        api.listProviders()
+            .then((data) => {
+                const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
+                setProviders(active);
+                if (active.length > 0 && !active.find((p) => p.name === provider)) {
+                    setProvider(active[0].name);
+                }
+            })
+            .catch(() => setProviders([]));
+    }, []);
 
     const sendRequest = async () => {
         setLoading(true);
@@ -350,11 +537,27 @@ function JsonTesterTab() {
                     </CardTitle>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                    <div className="p-3 rounded-lg bg-secondary/50 text-xs text-muted-foreground flex items-start gap-2">
+                        <Info className="w-4 h-4 shrink-0 mt-0.5" />
+                        <span>
+                            Send raw HTTP requests to the LLM provider through the gateway.
+                            The request is proxied through your selected provider&apos;s base URL.
+                            Use this to test any API endpoint supported by the provider.
+                        </span>
+                    </div>
+
                     <div className="grid grid-cols-3 gap-2">
                         <div className="space-y-1">
                             <label className="text-xs text-muted-foreground">Provider</label>
                             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                                <option value="portkey">Portkey</option>
+                                {providers.length === 0 && (
+                                    <option value="portkey">Portkey (default)</option>
+                                )}
+                                {providers.map((p) => (
+                                    <option key={p.id} value={p.name}>
+                                        {p.name}
+                                    </option>
+                                ))}
                             </Select>
                         </div>
                         <div className="space-y-1">
@@ -373,7 +576,7 @@ function JsonTesterTab() {
                     </div>
 
                     <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Headers (JSON)</label>
+                        <label className="text-xs text-muted-foreground">Headers (JSON) — optional extra headers</label>
                         <Textarea
                             value={headers}
                             onChange={(e) => setHeaders(e.target.value)}
@@ -383,7 +586,7 @@ function JsonTesterTab() {
                     </div>
 
                     <div className="space-y-1">
-                        <label className="text-xs text-muted-foreground">Body (JSON)</label>
+                        <label className="text-xs text-muted-foreground">Body (JSON) — the request payload</label>
                         <Textarea
                             value={body}
                             onChange={(e) => setBody(e.target.value)}
@@ -427,6 +630,7 @@ function JsonTesterTab() {
                         <div className="flex flex-col items-center justify-center h-64 text-muted-foreground">
                             <Terminal className="w-8 h-8 mb-2 opacity-30" />
                             <p className="text-sm">Send a request to see the response</p>
+                            <p className="text-xs mt-1">Status code, headers, and body will appear here</p>
                         </div>
                     )}
                     {error && (
@@ -454,6 +658,32 @@ function JsonTesterTab() {
                     )}
                 </CardContent>
             </Card>
+
+        {/* Quick Tips */}
+        <div className="col-span-full p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+            <div className="flex items-center gap-2 mb-3">
+                <Lightbulb className="w-4 h-4 text-primary" />
+                <span className="font-medium text-sm text-primary">Quick Tips</span>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="flex items-start gap-2">
+                    <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                    <p><strong>Provider:</strong> Select which LLM service to send the request through. Must be configured in Providers.</p>
+                </div>
+                <div className="flex items-start gap-2">
+                    <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                    <p><strong>Method + Path:</strong> POST /chat/completions is the standard chat endpoint. Try GET /models to list available models.</p>
+                </div>
+                <div className="flex items-start gap-2">
+                    <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                    <p><strong>Body:</strong> JSON payload sent to the provider. Must include "model" and "messages" for chat requests.</p>
+                </div>
+                <div className="flex items-start gap-2">
+                    <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                    <p><strong>Response:</strong> Shows HTTP status code, response headers, and the full response body from the provider.</p>
+                </div>
+            </div>
+        </div>
         </div>
     );
 }

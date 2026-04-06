@@ -16,6 +16,10 @@ import httpx
 
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.utils.network import _is_private_ip
+from app.infrastructure.adapters.portkey_adapter import (
+    _infer_provider_from_model,
+    _parse_api_key,
+)
 from app.infrastructure.database.repositories import ProviderRepository
 
 logger = logging.getLogger(__name__)
@@ -160,8 +164,11 @@ class TesterService:
                 status_code=404,
             )
 
-        api_key: str = provider.api_key
+        raw_api_key: str = provider.api_key
         base_url: str = provider.base_url
+
+        # Parse api_key: support "portkey_key::virtual_key" format
+        api_key, virtual_key = _parse_api_key(raw_api_key)
 
         # §1.2 step 3: Build URL
         url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
@@ -180,12 +187,16 @@ class TesterService:
             )
 
         # §1.2 step 5: Build headers
-        # x-portkey-provider is required by Portkey API to route to the correct LLM
         request_headers: dict[str, str] = {
             "x-portkey-api-key": api_key,
-            "x-portkey-provider": "openai",
             "Content-Type": "application/json",
         }
+        # Use virtual key if available, otherwise use x-portkey-provider
+        if virtual_key:
+            request_headers["x-portkey-virtual-key"] = virtual_key
+        else:
+            request_headers["x-portkey-provider"] = "openai"
+
         if headers is not None:
             for key, value in headers.items():
                 # Protection: do not overwrite x-portkey-api-key (case-insensitive)
@@ -193,12 +204,8 @@ class TesterService:
                     continue
                 request_headers[key] = value
 
-        # Infer x-portkey-provider from model in body if available
-        if body and isinstance(body.get("model"), str):
-            from app.infrastructure.adapters.portkey_adapter import (
-                _infer_provider_from_model,
-            )
-
+        # Infer x-portkey-provider from model in body if available (only when no virtual key)
+        if not virtual_key and body and isinstance(body.get("model"), str):
             request_headers["x-portkey-provider"] = _infer_provider_from_model(
                 body["model"]
             )

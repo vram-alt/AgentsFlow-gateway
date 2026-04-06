@@ -191,6 +191,7 @@ export interface Policy {
     id: number;
     name: string;
     body: Record<string, unknown>;
+    remote_id?: string | null;
     provider_name: string;
     is_active: boolean;
     created_at: string;

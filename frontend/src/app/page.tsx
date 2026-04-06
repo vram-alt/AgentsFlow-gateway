@@ -15,6 +15,7 @@ import {
   ArrowDownRight,
   BarChart3,
   Server,
+  Lightbulb,
 } from "lucide-react";
 import { api, type StatsSummary, type ChartData, type ProviderHealth } from "@/lib/api-client";
 
@@ -269,6 +270,32 @@ export default function DashboardPage() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Quick Tips */}
+      <div className="p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+        <div className="flex items-center gap-2 mb-3">
+          <Lightbulb className="w-4 h-4 text-primary" />
+          <span className="font-medium text-sm text-primary">Quick Tips</span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <div className="flex items-start gap-2">
+            <Activity className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+            <p>Total Requests and Error Rate show all-time statistics from the audit log.</p>
+          </div>
+          <div className="flex items-start gap-2">
+            <Server className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+            <p>Provider Health checks if your LLM providers are reachable.</p>
+          </div>
+          <div className="flex items-start gap-2">
+            <Zap className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+            <p>Top Models shows which AI models are used most frequently.</p>
+          </div>
+          <div className="flex items-start gap-2">
+            <RefreshCw className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+            <p>Data refreshes automatically every 60 seconds, or click Refresh manually.</p>
+          </div>
+        </div>
       </div>
     </div>
   );
