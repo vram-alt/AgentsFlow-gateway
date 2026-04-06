@@ -150,12 +150,31 @@ export interface UsageInfo {
     total_tokens: number;
 }
 
+export interface GuardrailCheckInfo {
+    id: string;
+    verdict: boolean;
+    explanation: string;
+}
+
+export interface GuardrailDetails {
+    summary: string;
+    hooks: Array<{
+        id: string;
+        verdict: boolean;
+        deny: boolean;
+        checks: GuardrailCheckInfo[];
+    }>;
+    failed_checks: GuardrailCheckInfo[];
+    passed_checks: GuardrailCheckInfo[];
+}
+
 export interface ChatResponse {
     trace_id: string;
     content: string;
     model: string;
     usage?: UsageInfo | null;
     guardrail_blocked: boolean;
+    guardrail_details?: GuardrailDetails | null;
 }
 
 export interface Provider {

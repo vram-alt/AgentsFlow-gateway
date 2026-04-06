@@ -216,6 +216,18 @@ class PolicyRepository:
         await self._session.commit()
         return True
 
+    async def hard_delete(self, policy_id: int) -> bool:
+        """Permanently remove a policy from the database."""
+        stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
+        result = await self._session.execute(stmt)
+        policy = result.scalar_one_or_none()
+        if policy is None:
+            return False
+
+        await self._session.delete(policy)
+        await self._session.commit()
+        return True
+
     async def toggle_active(self, policy_id: int) -> Optional[PolicyModel]:
         """Toggle is_active status of a policy."""
         stmt = select(PolicyModel).where(PolicyModel.id == policy_id)
@@ -308,7 +320,10 @@ class LogRepository:
         [YEL] ORDER BY id for deterministic pagination.
         """
         stmt = (
-            select(LogEntryModel).order_by(LogEntryModel.id.desc()).limit(limit).offset(offset)
+            select(LogEntryModel)
+            .order_by(LogEntryModel.id.desc())
+            .limit(limit)
+            .offset(offset)
         )
         result = await self._session.execute(stmt)
         return result.scalars().all()

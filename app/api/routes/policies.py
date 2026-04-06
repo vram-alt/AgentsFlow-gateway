@@ -37,9 +37,9 @@ async def list_policies(
     policy_service: PolicyService = Depends(get_policy_service),
     _current_user: str = Depends(get_current_user),
 ) -> JSONResponse:
-    """List all active policies."""
+    """List all policies (active and inactive)."""
     try:
-        result = await policy_service.list_policies()
+        result = await policy_service.list_policies(only_active=False)
     except Exception as exc:
         return internal_error_response(exc)
 

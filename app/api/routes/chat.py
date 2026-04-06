@@ -57,11 +57,15 @@ async def send_chat(
         usage_data = usage_raw.model_dump()
     else:
         usage_data = usage_raw  # already a dict or None
+    # Extract guardrail_details safely (may not exist on mocks or older DTOs)
+    guardrail_details_raw = getattr(result, "guardrail_details", None)
+
     chat_response = ChatResponse(
         trace_id=result.trace_id,
         content=result.content,
         model=result.model,
         usage=usage_data,
         guardrail_blocked=result.guardrail_blocked,
+        guardrail_details=guardrail_details_raw,
     )
     return JSONResponse(status_code=200, content=chat_response.model_dump())

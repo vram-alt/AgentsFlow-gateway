@@ -120,12 +120,22 @@ class PortkeyAdapter(GatewayProvider):
             )
             headers["x-portkey-trace-id"] = prompt.trace_id
             if prompt.guardrail_ids:
-                # Portkey guardrails are applied via x-portkey-config header
-                # with before_request_hooks containing guardrail slugs and deny:true
-                hooks = [{"id": gid, "deny": True} for gid in prompt.guardrail_ids]
-                config = {"before_request_hooks": hooks}
-                headers["x-portkey-config"] = json.dumps(config)
-
+                # Portkey guardrails: pass IDs via x-portkey-config with
+                # before_request_hooks array. Each hook references a guardrail
+                # by ID and sets deny=true to block failing requests (446).
+                hooks: list[dict[str, Any]] = [
+                    {
+                        "type": "guardrail",
+                        "id": gid,
+                        "deny": True,
+                    }
+                    for gid in prompt.guardrail_ids
+                ]
+                guardrail_config: dict[str, Any] = {
+                    "before_request_hooks": hooks,
+                }
+                headers["x-portkey-config"] = json.dumps(guardrail_config)
+                headers["x-portkey-guardrails"] = json.dumps(list(prompt.guardrail_ids))
             body: dict[str, Any] = {
                 "model": prompt.model,
                 "messages": [
@@ -147,18 +157,55 @@ class PortkeyAdapter(GatewayProvider):
                     method="POST", url=url, headers=headers, json_body=body
                 )
             except httpx.HTTPStatusError as exc:
-                # Portkey guardrail blocked (HTTP 446)
+                # Portkey guardrail blocked (HTTP 446) — deny=true, verdict=false
                 if exc.response.status_code == 446:
-                    detail = self._extract_response_detail(exc.response)
+                    raw_body = self._safe_json(exc.response)
+                    guardrail_info = self._extract_guardrail_details(raw_body)
+                    content = guardrail_info.get(
+                        "summary",
+                        "Request blocked by guardrail policy",
+                    )
                     return UnifiedResponse(
                         trace_id=prompt.trace_id,
-                        content=detail or "Request blocked by guardrail policy",
+                        content=content,
                         model=prompt.model,
                         usage=None,
-                        provider_raw=exc.response.json() if exc.response.text else {},
+                        provider_raw=raw_body,
                         guardrail_blocked=True,
+                        guardrail_details=guardrail_info,
                     )
-                # Portkey guardrail warning (HTTP 246) — handled below after resp
+                # Portkey guardrail warning (HTTP 246) — deny=false, verdict=false
+                # The request still proceeds; we handle it below after resp.
+                if exc.response.status_code == 246:
+                    # 246 means guardrail failed but deny=false → request was
+                    # still processed. Treat as a normal (non-blocked) response
+                    # but attach guardrail warning details.
+                    raw_body = self._safe_json(exc.response)
+                    guardrail_info = self._extract_guardrail_details(raw_body)
+                    # Extract the actual LLM response from the 246 body
+                    choices = raw_body.get("choices", [])
+                    if choices and isinstance(choices, list):
+                        llm_content = choices[0].get("message", {}).get("content", "")
+                    else:
+                        llm_content = guardrail_info.get("summary", "")
+                    model_name = raw_body.get("model", prompt.model)
+                    usage_246: UsageInfo | None = None
+                    if "usage" in raw_body:
+                        u = raw_body["usage"]
+                        usage_246 = UsageInfo(
+                            prompt_tokens=u.get("prompt_tokens", 0),
+                            completion_tokens=u.get("completion_tokens", 0),
+                            total_tokens=u.get("total_tokens", 0),
+                        )
+                    return UnifiedResponse(
+                        trace_id=prompt.trace_id,
+                        content=llm_content,
+                        model=model_name,
+                        usage=usage_246,
+                        provider_raw=raw_body,
+                        guardrail_blocked=False,
+                        guardrail_details=guardrail_info,
+                    )
                 # Demo fallback: if LLM provider returns 401 (no valid API key)
                 # AND DEMO_MODE is enabled, return a demo response so the system
                 # works end-to-end without a real LLM API key configured.
@@ -186,12 +233,19 @@ class PortkeyAdapter(GatewayProvider):
                     total_tokens=u["total_tokens"],
                 )
 
+            # Check for guardrail hook_results in successful responses
+            # (Portkey may include them even on 200 when guardrails pass)
+            guardrail_details_ok: dict[str, Any] | None = None
+            if "hook_results" in data:
+                guardrail_details_ok = self._extract_guardrail_details(data)
+
             return UnifiedResponse(
                 trace_id=prompt.trace_id,
                 content=content,
                 model=model,
                 usage=usage,
                 provider_raw=data,
+                guardrail_details=guardrail_details_ok,
             )
         except Exception as exc:
             return self._handle_error(exc, trace_id=prompt.trace_id)
@@ -442,6 +496,116 @@ class PortkeyAdapter(GatewayProvider):
         if last_exc is not None:
             raise last_exc
         raise RuntimeError("Unexpected: no exception captured after retries")
+
+    @staticmethod
+    def _safe_json(response: httpx.Response) -> dict[str, Any]:
+        """Safely parse JSON from an HTTP response, returning {} on failure."""
+        try:
+            data = response.json()
+            return data if isinstance(data, dict) else {}
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _extract_guardrail_details(body: dict[str, Any]) -> dict[str, Any]:
+        """Extract structured guardrail check details from Portkey response body.
+
+        Portkey returns hook_results with before_request_hooks / after_request_hooks.
+        Each hook has: verdict (bool), id (str), checks (list), deny (bool).
+        Each check has: verdict (bool), id (str), data.explanation (str).
+
+        Returns a dict with:
+        - summary: human-readable summary of what happened
+        - hooks: list of hook results with their checks
+        - failed_checks: list of checks that failed (verdict=false)
+        - passed_checks: list of checks that passed (verdict=true)
+        """
+        result: dict[str, Any] = {
+            "summary": "",
+            "hooks": [],
+            "failed_checks": [],
+            "passed_checks": [],
+        }
+
+        hook_results = body.get("hook_results", {})
+        if not isinstance(hook_results, dict):
+            # Fallback: try to extract a simple message
+            detail = body.get("data", {})
+            if isinstance(detail, dict) and "message" in detail:
+                result["summary"] = str(detail["message"])
+            elif "message" in body:
+                result["summary"] = str(body["message"])
+            return result
+
+        all_hooks: list[dict[str, Any]] = []
+        for hook_type in ("before_request_hooks", "after_request_hooks"):
+            hooks = hook_results.get(hook_type, [])
+            if isinstance(hooks, list):
+                for hook in hooks:
+                    if isinstance(hook, dict):
+                        all_hooks.append(hook)
+
+        failed_explanations: list[str] = []
+        passed_explanations: list[str] = []
+
+        for hook in all_hooks:
+            hook_id = hook.get("id", "unknown")
+            hook_verdict = hook.get("verdict", True)
+            hook_deny = hook.get("deny", False)
+            checks = hook.get("checks", [])
+
+            hook_info: dict[str, Any] = {
+                "id": hook_id,
+                "verdict": hook_verdict,
+                "deny": hook_deny,
+                "checks": [],
+            }
+
+            if isinstance(checks, list):
+                for check in checks:
+                    if not isinstance(check, dict):
+                        continue
+                    check_id = check.get("id", "unknown")
+                    check_verdict = check.get("verdict", True)
+                    check_data = check.get("data", {})
+                    explanation = ""
+                    if isinstance(check_data, dict):
+                        explanation = check_data.get("explanation", "")
+
+                    check_info = {
+                        "id": check_id,
+                        "verdict": check_verdict,
+                        "explanation": explanation,
+                    }
+                    hook_info["checks"].append(check_info)
+
+                    if not check_verdict:
+                        result["failed_checks"].append(check_info)
+                        if explanation:
+                            failed_explanations.append(f"[{check_id}] {explanation}")
+                    else:
+                        result["passed_checks"].append(check_info)
+                        if explanation:
+                            passed_explanations.append(f"[{check_id}] {explanation}")
+
+            result["hooks"].append(hook_info)
+
+        # Build human-readable summary
+        if failed_explanations:
+            result["summary"] = "Guardrail blocked: " + "; ".join(failed_explanations)
+        elif not all_hooks:
+            # No hook_results found — use generic message
+            detail = body.get("data", {})
+            if isinstance(detail, dict) and "message" in detail:
+                result["summary"] = str(detail["message"])
+            elif "message" in body:
+                result["summary"] = str(body["message"])
+            else:
+                result["summary"] = "Request blocked by guardrail policy"
+        else:
+            result["summary"] = "Request blocked by guardrail policy"
+
+        return result
 
     @staticmethod
     def _extract_response_detail(response: httpx.Response) -> str:

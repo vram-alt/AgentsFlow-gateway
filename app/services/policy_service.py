@@ -194,8 +194,8 @@ class PolicyService:
                         # For other errors (timeout, rate limit, etc.) — return the error
                         return cloud_result
 
-        # 3. Soft delete in DB
-        result = await self.policy_repo.soft_delete(policy_id)
+        # 3. Hard delete from DB (permanent removal so it doesn't reappear in list)
+        result = await self.policy_repo.hard_delete(policy_id)
 
         # 4. Return True
         return result
@@ -302,7 +302,7 @@ class PolicyService:
             ):
                 # This policy was synced from cloud but no longer exists there
                 try:
-                    await self.policy_repo.soft_delete(local_policy.id)
+                    await self.policy_repo.hard_delete(local_policy.id)
                     deleted += 1
                     logger.info(
                         "Soft-deleted local policy %s (remote_id=%s) — "

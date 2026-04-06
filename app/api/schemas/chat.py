@@ -49,6 +49,7 @@ class ChatResponse(BaseModel):
     model: str
     usage: Optional[UsageInfo | dict[str, Any]] = None
     guardrail_blocked: bool
+    guardrail_details: Optional[dict[str, Any]] = None
 
 
 # Re-export from common to maintain backward compatibility

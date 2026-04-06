@@ -50,7 +50,7 @@ function humanError(err: unknown): string {
 
 export default function PoliciesPage() {
     const [policies, setPolicies] = useState<Policy[]>([]);
-    const [providers, setProviders] = useState<{name: string, is_active: boolean}[]>([]);
+    const [providers, setProviders] = useState<{ name: string, is_active: boolean }[]>([]);
     const [loading, setLoading] = useState(true);
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editingPolicy, setEditingPolicy] = useState<Policy | null>(null);
@@ -66,7 +66,22 @@ export default function PoliciesPage() {
     const [pageError, setPageError] = useState<string | null>(null);
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
-    const [isCloudMode, setIsCloudMode] = useState(true);
+
+    // Persist the Local/Cloud tab choice in localStorage so it survives navigation
+    const [isCloudMode, setIsCloudMode] = useState<boolean>(() => {
+        if (typeof window !== "undefined") {
+            const saved = localStorage.getItem("policies_cloud_mode");
+            if (saved !== null) return saved === "true";
+        }
+        return true; // default to cloud
+    });
+
+    const setCloudMode = (value: boolean) => {
+        setIsCloudMode(value);
+        if (typeof window !== "undefined") {
+            localStorage.setItem("policies_cloud_mode", String(value));
+        }
+    };
 
     const fetchPolicies = async () => {
         setLoading(true);
@@ -74,22 +89,28 @@ export default function PoliciesPage() {
         try {
             const data = await api.listPolicies();
             setPolicies(Array.isArray(data) ? data : []);
-            
+
             const providersData = await api.listProviders();
             setProviders(Array.isArray(providersData) ? providersData : []);
-            
-            // Detect if using Portkey Cloud or Self-hosted
-            const activeProviders = (Array.isArray(providersData) ? providersData : []).filter((p: Provider) => p.is_active);
-            const hasCloudProvider = activeProviders.some((p: Provider) => 
-                p.base_url?.includes("portkey.ai") || p.api_key?.includes("::")
-            );
-            setIsCloudMode(hasCloudProvider);
+
+            // Auto-detect cloud mode ONLY if user has never manually chosen a tab
+            if (typeof window !== "undefined" && localStorage.getItem("policies_cloud_mode") === null) {
+                const activeProviders = (Array.isArray(providersData) ? providersData : []).filter((p: Provider) => p.is_active);
+                const hasCloudProvider = activeProviders.some((p: Provider) =>
+                    p.base_url?.includes("portkey.ai") || p.api_key?.includes("::")
+                );
+                setCloudMode(hasCloudProvider);
+            }
         } catch (err: unknown) {
             setPolicies([]);
             setPageError(humanError(err));
         } finally {
             setLoading(false);
         }
+    };
+
+    const handleRefresh = () => {
+        fetchPolicies();
     };
 
     useEffect(() => {
@@ -154,7 +175,8 @@ export default function PoliciesPage() {
         try {
             await api.deletePolicy(id);
             setDeleteConfirm(null);
-            fetchPolicies();
+            // Remove from local state immediately — no tab switch
+            setPolicies((prev) => prev.filter((p) => p.id !== id));
         } catch (err: unknown) {
             setDeleteConfirm(null);
             setPageError(`Failed to delete policy: ${humanError(err)}`);
@@ -166,15 +188,17 @@ export default function PoliciesPage() {
     const handleToggle = async (id: number) => {
         setPageError(null);
         try {
-            await api.togglePolicy(id);
-            fetchPolicies();
+            const updated = await api.togglePolicy(id);
+            // Update local state in-place — policy stays in list, just greyed out
+            setPolicies((prev) =>
+                prev.map((p) => (p.id === id ? { ...p, is_active: updated.is_active } : p))
+            );
         } catch (err: unknown) {
             setPageError(`Failed to toggle policy: ${humanError(err)}`);
         }
     };
 
-    // Cloud mode: show only cloud-synced policies (with remote_id)
-    // Self-hosted mode: show only local policies (without remote_id)
+    // Filter policies by tab: Local = no remote_id, Cloud = has remote_id
     const displayedPolicies = isCloudMode
         ? policies.filter((p) => !!p.remote_id)
         : policies.filter((p) => !p.remote_id);
@@ -211,7 +235,7 @@ export default function PoliciesPage() {
                             Sync from Cloud
                         </Button>
                     )}
-                    <Button variant="outline" size="sm" onClick={fetchPolicies} disabled={loading}>
+                    <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
                         <RefreshCw className={`w-4 h-4 mr-2 ${loading ? "animate-spin" : ""}`} />
                         Refresh
                     </Button>
@@ -237,22 +261,35 @@ export default function PoliciesPage() {
             )}
 
             {/* Mode Toggle */}
-            <div className="flex items-center gap-4 p-3 rounded-lg border border-border bg-secondary/30">
-                <button
-                    onClick={() => setIsCloudMode(false)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer ${!isCloudMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                    <HardDrive className="w-4 h-4" />
-                    Local
-                </button>
-                <button
-                    onClick={() => setIsCloudMode(true)}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-all cursor-pointer ${isCloudMode ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
-                >
-                    <Cloud className="w-4 h-4" />
-                    Cloud
-                </button>
-                <span className="text-xs text-muted-foreground ml-2">
+            <div className="flex items-center gap-4">
+                <div className="relative flex items-center w-56 rounded-lg bg-secondary/60 p-0.5 text-xs">
+                    {/* Sliding highlight */}
+                    <div
+                        className="absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-primary shadow-sm transition-transform duration-200 ease-in-out"
+                        style={{ transform: isCloudMode ? "translateX(calc(100% + 4px))" : "translateX(0)" }}
+                    />
+                    <button
+                        onClick={() => setCloudMode(false)}
+                        className={`relative z-10 flex items-center justify-center gap-1.5 w-1/2 py-1.5 rounded-md font-medium transition-colors duration-200 cursor-pointer ${!isCloudMode
+                            ? "text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                            }`}
+                    >
+                        <HardDrive className="w-3.5 h-3.5" />
+                        Local
+                    </button>
+                    <button
+                        onClick={() => setCloudMode(true)}
+                        className={`relative z-10 flex items-center justify-center gap-1.5 w-1/2 py-1.5 rounded-md font-medium transition-colors duration-200 cursor-pointer ${isCloudMode
+                            ? "text-primary-foreground"
+                            : "text-muted-foreground hover:text-foreground"
+                            }`}
+                    >
+                        <Cloud className="w-3.5 h-3.5" />
+                        Cloud
+                    </button>
+                </div>
+                <span className="text-xs text-muted-foreground">
                     {isCloudMode ? "Policies synced with Portkey Cloud" : "Policies stored locally only"}
                 </span>
             </div>
@@ -310,9 +347,22 @@ export default function PoliciesPage() {
                                                 </div>
                                             </td>
                                             <td className="p-4">
-                                                <Badge variant="outline" className="text-xs">
-                                                    {policy.provider_name}
-                                                </Badge>
+                                                <div className="flex items-center gap-1.5">
+                                                    <Badge variant="outline" className="text-xs">
+                                                        {policy.provider_name}
+                                                    </Badge>
+                                                    {policy.remote_id ? (
+                                                        <Badge variant="outline" className="text-xs text-blue-500 border-blue-500/30">
+                                                            <Cloud className="w-3 h-3 mr-1" />
+                                                            Cloud
+                                                        </Badge>
+                                                    ) : (
+                                                        <Badge variant="outline" className="text-xs text-orange-500 border-orange-500/30">
+                                                            <HardDrive className="w-3 h-3 mr-1" />
+                                                            Local
+                                                        </Badge>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="p-4">
                                                 <Badge variant={policy.is_active ? "success" : "secondary"}>
@@ -331,8 +381,8 @@ export default function PoliciesPage() {
                                                         variant="ghost"
                                                         size="icon"
                                                         className={`h-8 w-8 ${policy.is_active
-                                                                ? "text-green-500 hover:text-red-500"
-                                                                : "text-muted-foreground hover:text-green-500"
+                                                            ? "text-green-500 hover:text-red-500"
+                                                            : "text-muted-foreground hover:text-green-500"
                                                             }`}
                                                         onClick={() => handleToggle(policy.id)}
                                                         title={policy.is_active ? "Deactivate policy" : "Activate policy"}

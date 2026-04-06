@@ -22,8 +22,11 @@ import {
     X,
     Info,
     Lightbulb,
+    Shield,
+    Cloud,
+    HardDrive,
 } from "lucide-react";
-import { api, type MessageItem, type ChatResponse, type TesterProxyResponse, type Provider, type Policy } from "@/lib/api-client";
+import { api, type MessageItem, type ChatResponse, type TesterProxyResponse, type Provider, type Policy, type GuardrailDetails } from "@/lib/api-client";
 
 interface ChatMessage {
     role: "user" | "assistant" | "system";
@@ -32,6 +35,7 @@ interface ChatMessage {
     usage?: { prompt_tokens: number; completion_tokens: number; total_tokens: number } | null;
     trace_id?: string;
     guardrail_blocked?: boolean;
+    guardrail_details?: GuardrailDetails | null;
 }
 
 export default function SandboxPage() {
@@ -82,6 +86,7 @@ function ChatTab() {
     const [providers, setProviders] = useState<Provider[]>([]);
     const [policies, setPolicies] = useState<Policy[]>([]);
     const [selectedGuardrails, setSelectedGuardrails] = useState<string[]>([]);
+    const [guardrailMode, setGuardrailMode] = useState<"cloud" | "local">("cloud");
 
     useEffect(() => {
         // Load active providers
@@ -95,10 +100,12 @@ function ChatTab() {
             })
             .catch(() => setProviders([]));
 
-        // Load active policies (guardrails)
+        // Load all active policies (both cloud and local)
         api.listPolicies()
             .then((data) => {
-                const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
+                const active = (Array.isArray(data) ? data : []).filter(
+                    (p) => p.is_active
+                );
                 setPolicies(active);
             })
             .catch(() => setPolicies([]));
@@ -145,14 +152,52 @@ function ChatTab() {
                 guardrail_ids: selectedGuardrails.length > 0 ? selectedGuardrails : undefined,
             });
 
-            // Build blocked message with guardrail names
+            // Build blocked message with guardrail details from backend
             let blockedContent = "";
             if (response.guardrail_blocked) {
-                const appliedIds = selectedGuardrails;
-                const appliedNames = appliedIds
-                    .map(id => policies.find(p => (p.remote_id || p.name) === id)?.name || id)
-                    .join(", ");
-                blockedContent = `Request blocked by guardrail policy.\n\nBlocked by: ${appliedNames || "Unknown policy"}\n\nThe message did not pass the security checks defined in the active guardrail(s).`;
+                const details = response.guardrail_details;
+
+                // Resolve guardrail UUIDs to human-readable policy names
+                const resolveHookName = (hookId: string): string => {
+                    const policy = policies.find(p => p.remote_id === hookId);
+                    return policy?.name || hookId;
+                };
+
+                if (details?.hooks && details.hooks.length > 0) {
+                    // Find which hooks actually failed (verdict=false)
+                    const failedHooks = details.hooks.filter(h => !h.verdict || (h.checks && h.checks.some(c => !c.verdict)));
+                    const blockedByNames = failedHooks.length > 0
+                        ? failedHooks.map(h => resolveHookName(h.id))
+                        : details.hooks.map(h => resolveHookName(h.id));
+
+                    blockedContent = `Blocked by: ${blockedByNames.join(", ")}`;
+
+                    // Add specific failed check explanations
+                    if (details.failed_checks && details.failed_checks.length > 0) {
+                        const reasons = details.failed_checks
+                            .filter(c => c.explanation)
+                            .map(c => {
+                                // Clean up technical explanation for user
+                                const exp = c.explanation
+                                    .replace(/The regex pattern '[^']*' matched the text\.?/i, "Prohibited content detected in your message.")
+                                    .replace(/The regex pattern '[^']*' did not match the text\.?/i, "Message content did not pass the security check.")
+                                    .replace(/An error occurred while processing the regex:.*/, "Security check encountered an error.");
+                                return `• ${exp}`;
+                            })
+                            .join("\n");
+                        if (reasons) {
+                            blockedContent += "\n\nReason:\n" + reasons;
+                        }
+                    }
+                } else if (details?.summary) {
+                    blockedContent = details.summary;
+                } else {
+                    // Fallback to policy names from selected guardrails
+                    const appliedNames = selectedGuardrails
+                        .map(id => policies.find(p => p.remote_id === id)?.name || id)
+                        .join(", ");
+                    blockedContent = `Blocked by: ${appliedNames || "Unknown policy"}\n\nYour message did not pass the security checks.`;
+                }
             }
 
             const assistantMsg: ChatMessage = {
@@ -164,15 +209,41 @@ function ChatTab() {
                 usage: response.usage as ChatMessage["usage"],
                 trace_id: response.trace_id,
                 guardrail_blocked: response.guardrail_blocked,
+                guardrail_details: response.guardrail_details,
             };
             setMessages((prev) => [...prev, assistantMsg]);
         } catch (err) {
-            const errorMsg: ChatMessage = {
-                role: "assistant",
-                content: `Error: ${err instanceof Error ? err.message : "Unknown error"}`,
-                timestamp: new Date(),
-            };
-            setMessages((prev) => [...prev, errorMsg]);
+            const errMessage = err instanceof Error ? err.message : "Unknown error";
+
+            // Detect guardrail validation errors (local policies sent to Portkey)
+            const isGuardrailError = errMessage.includes("guardrails are not valid") ||
+                errMessage.includes("not valid") ||
+                errMessage.includes("guardrail");
+
+            if (isGuardrailError && selectedGuardrails.length > 0) {
+                // Show as a guardrail-blocked message with policy names
+                const appliedNames = selectedGuardrails
+                    .map(id => {
+                        const p = policies.find(pol => (pol.remote_id || pol.name) === id);
+                        return p?.name || id;
+                    })
+                    .join(", ");
+
+                const blockedMsg: ChatMessage = {
+                    role: "assistant",
+                    content: `Blocked by: ${appliedNames}\n\nThe selected guardrail policy is not available on the cloud provider. Local policies cannot enforce real-time checks — use Cloud policies for active protection.`,
+                    timestamp: new Date(),
+                    guardrail_blocked: true,
+                };
+                setMessages((prev) => [...prev, blockedMsg]);
+            } else {
+                const errorMsg: ChatMessage = {
+                    role: "assistant",
+                    content: `Error: ${errMessage}`,
+                    timestamp: new Date(),
+                };
+                setMessages((prev) => [...prev, errorMsg]);
+            }
         } finally {
             setLoading(false);
         }
@@ -186,277 +257,339 @@ function ChatTab() {
 
     return (
         <>
-        <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
-            {/* Settings Panel */}
-            <Card className="lg:col-span-1">
-                <CardHeader>
-                    <CardTitle className="text-base">Settings</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                    <div className="space-y-2">
-                        <label className="text-sm text-muted-foreground">Provider</label>
-                        <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
-                            {providers.length === 0 && (
-                                <option value="portkey">Portkey (default)</option>
-                            )}
-                            {providers.map((p) => (
-                                <option key={p.id} value={p.name}>
-                                    {p.name}
-                                </option>
-                            ))}
-                        </Select>
-
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm text-muted-foreground">Model</label>
-                        <Input
-                            value={model}
-                            onChange={(e) => setModel(e.target.value)}
-                            placeholder="gemma-3-12b-it"
-                        />
-
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm text-muted-foreground">Temperature</label>
-                        <Input
-                            type="number"
-                            step="0.1"
-                            min="0"
-                            max="2"
-                            value={temperature}
-                            onChange={(e) => setTemperature(e.target.value)}
-                        />
-
-                    </div>
-                    <div className="space-y-2">
-                        <label className="text-sm text-muted-foreground">Max Tokens</label>
-                        <Input
-                            type="number"
-                            min="1"
-                            max="128000"
-                            value={maxTokens}
-                            onChange={(e) => setMaxTokens(e.target.value)}
-                        />
-
-                    </div>
-
-                    {/* Guardrail Policies */}
-                    {policies.length > 0 && (
-                        <div className="space-y-3">
-                            <label className="text-sm text-muted-foreground flex justify-between items-center">
-                                Guardrails
-                                {selectedGuardrails.length > 0 && (
-                                    <span className="text-xs text-primary">{selectedGuardrails.length} active</span>
+            <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
+                {/* Settings Panel */}
+                <Card className="lg:col-span-1">
+                    <CardHeader>
+                        <CardTitle className="text-base">Settings</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Provider</label>
+                            <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
+                                {providers.length === 0 && (
+                                    <option value="portkey">Portkey (default)</option>
                                 )}
-                            </label>
-
-                            <Select
-                                value=""
-                                onChange={(e) => {
-                                    if (e.target.value) {
-                                        if (!selectedGuardrails.includes(e.target.value)) {
-                                            toggleGuardrail(e.target.value);
-                                        }
-                                    }
-                                }}
-                            >
-                                <option value="" disabled>Add a guardrail...</option>
-                                {policies.filter(p => !selectedGuardrails.includes(p.remote_id || p.name)).map(p => (
-                                    <option key={p.id} value={p.remote_id || p.name}>{p.name}</option>
+                                {providers.map((p) => (
+                                    <option key={p.id} value={p.name}>
+                                        {p.name}
+                                    </option>
                                 ))}
                             </Select>
 
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Model</label>
+                            <Input
+                                value={model}
+                                onChange={(e) => setModel(e.target.value)}
+                                placeholder="gemma-3-12b-it"
+                            />
 
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Temperature</label>
+                            <Input
+                                type="number"
+                                step="0.1"
+                                min="0"
+                                max="2"
+                                value={temperature}
+                                onChange={(e) => setTemperature(e.target.value)}
+                            />
 
-                            {selectedGuardrails.length > 0 && (
-                                <div className="flex flex-wrap gap-2 mt-2">
-                                    {selectedGuardrails.map(id => {
-                                        const policy = policies.find(p => (p.remote_id || p.name) === id);
-                                        if (!policy) return null;
-                                        return (
-                                            <Badge
-                                                key={id}
-                                                variant="secondary"
-                                                className="flex items-center gap-1 cursor-pointer hover:bg-destructive/10 hover:text-destructive transition-colors py-1 px-2"
-                                                onClick={() => toggleGuardrail(id)}
-                                                title="Click to remove"
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Max Tokens</label>
+                            <Input
+                                type="number"
+                                min="1"
+                                max="128000"
+                                value={maxTokens}
+                                onChange={(e) => setMaxTokens(e.target.value)}
+                            />
+
+                        </div>
+
+                        {/* Guardrail Policies */}
+                        {policies.length > 0 && (() => {
+                            const cloudPolicies = policies.filter(p => !!p.remote_id);
+                            const localPolicies = policies.filter(p => !p.remote_id);
+                            const filteredPolicies = guardrailMode === "cloud" ? cloudPolicies : localPolicies;
+                            const availablePolicies = filteredPolicies.filter(
+                                p => !selectedGuardrails.includes(p.remote_id || p.name)
+                            );
+
+                            return (
+                                <div className="space-y-3">
+                                    <label className="text-sm text-muted-foreground flex justify-between items-center">
+                                        <span className="flex items-center gap-1.5">
+                                            <Shield className="w-3.5 h-3.5" />
+                                            Guardrails
+                                        </span>
+                                        {selectedGuardrails.length > 0 && (
+                                            <span className="text-xs text-primary">{selectedGuardrails.length} active</span>
+                                        )}
+                                    </label>
+
+                                    {/* Compact Cloud / Local toggle */}
+                                    <div className="relative flex items-center w-full rounded-lg bg-secondary/60 p-0.5 text-[11px]">
+                                        {/* Sliding highlight */}
+                                        <div
+                                            className="absolute top-0.5 bottom-0.5 w-[calc(50%-2px)] rounded-md bg-primary shadow-sm transition-transform duration-200 ease-in-out"
+                                            style={{ transform: guardrailMode === "local" ? "translateX(calc(100% + 4px))" : "translateX(0)" }}
+                                        />
+                                        <button
+                                            onClick={() => setGuardrailMode("cloud")}
+                                            className={`relative z-10 flex items-center justify-center gap-1 w-1/2 py-1 rounded-md font-medium transition-colors duration-200 cursor-pointer ${guardrailMode === "cloud"
+                                                ? "text-primary-foreground"
+                                                : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            <Cloud className="w-3 h-3" />
+                                            Cloud
+                                            {cloudPolicies.length > 0 && (
+                                                <span className="opacity-60">({cloudPolicies.length})</span>
+                                            )}
+                                        </button>
+                                        <button
+                                            onClick={() => setGuardrailMode("local")}
+                                            className={`relative z-10 flex items-center justify-center gap-1 w-1/2 py-1 rounded-md font-medium transition-colors duration-200 cursor-pointer ${guardrailMode === "local"
+                                                ? "text-primary-foreground"
+                                                : "text-muted-foreground hover:text-foreground"
+                                                }`}
+                                        >
+                                            <HardDrive className="w-3 h-3" />
+                                            Local
+                                            {localPolicies.length > 0 && (
+                                                <span className="opacity-60">({localPolicies.length})</span>
+                                            )}
+                                        </button>
+                                    </div>
+
+                                    <p className="text-[10px] text-muted-foreground/70 leading-tight">
+                                        {guardrailMode === "cloud"
+                                            ? "Cloud guardrails are enforced by Portkey — requests are validated before reaching the LLM."
+                                            : "Local policies are informational only — they are not enforced by Portkey Cloud."}
+                                    </p>
+
+                                    <Select
+                                        value=""
+                                        onChange={(e) => {
+                                            if (e.target.value) {
+                                                if (!selectedGuardrails.includes(e.target.value)) {
+                                                    toggleGuardrail(e.target.value);
+                                                }
+                                            }
+                                        }}
+                                    >
+                                        <option value="" disabled>Add a guardrail...</option>
+                                        {availablePolicies.map(p => (
+                                            <option key={p.id} value={p.remote_id || p.name}>{p.name}</option>
+                                        ))}
+                                    </Select>
+
+                                    {selectedGuardrails.length > 0 && (
+                                        <div className="space-y-1.5 mt-1">
+                                            <div className="flex flex-wrap gap-1.5">
+                                                {selectedGuardrails.map(id => {
+                                                    const policy = policies.find(p => (p.remote_id || p.name) === id);
+                                                    if (!policy) return null;
+                                                    const isCloud = !!policy.remote_id;
+                                                    return (
+                                                        <Badge
+                                                            key={id}
+                                                            variant="secondary"
+                                                            className={`flex items-center gap-1 cursor-pointer hover:bg-destructive/10 hover:text-destructive transition-colors py-0.5 px-2 text-[11px] ${isCloud ? "border-blue-500/20" : "border-orange-500/20"}`}
+                                                            onClick={() => toggleGuardrail(id)}
+                                                            title="Click to remove"
+                                                        >
+                                                            {isCloud ? <Cloud className="w-2.5 h-2.5 opacity-50" /> : <HardDrive className="w-2.5 h-2.5 opacity-50" />}
+                                                            {policy.name}
+                                                            <X className="w-2.5 h-2.5 ml-0.5 opacity-40" />
+                                                        </Badge>
+                                                    );
+                                                })}
+                                            </div>
+                                            <button
+                                                onClick={() => setSelectedGuardrails([])}
+                                                className="text-[10px] text-muted-foreground hover:text-destructive transition-colors cursor-pointer flex items-center gap-1"
                                             >
-                                                {policy.name}
-                                                <X className="w-3 h-3 ml-1 opacity-50" />
-                                            </Badge>
-                                        );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    )}
-
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        className="w-full"
-                        onClick={() => setMessages([])}
-                    >
-                        <Trash2 className="w-4 h-4 mr-2" />
-                        Clear Chat
-                    </Button>
-
-                </CardContent>
-            </Card>
-
-            {/* Chat Area */}
-            <Card className="lg:col-span-3 flex flex-col h-[calc(100vh-14rem)]">
-                <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
-                    {messages.length === 0 && (
-                        <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
-                            <Bot className="w-12 h-12 mb-4 opacity-30" />
-                            <p className="text-sm font-medium">Send a message to start the conversation</p>
-                            <p className="text-xs mt-2 max-w-md text-center">
-                                Your messages are sent through the AI Gateway to the selected LLM provider.
-                                Each response includes a trace ID for debugging in the Observability tab.
-                            </p>
-                        </div>
-                    )}
-                    {messages.map((msg, i) => (
-                        <div
-                            key={i}
-                            className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
-                        >
-                            {msg.role !== "user" && (
-                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                                    <Bot className="w-4 h-4 text-primary" />
-                                </div>
-                            )}
-                            <div
-                                className={`max-w-[80%] rounded-xl p-4 ${msg.role === "user"
-                                    ? "bg-primary text-primary-foreground"
-                                    : msg.guardrail_blocked
-                                        ? "bg-destructive/10 border border-destructive/30"
-                                        : "bg-secondary"
-                                    }`}
-                            >
-                                {msg.guardrail_blocked && (
-                                    <div className="flex items-center gap-2 mb-2 pb-2 border-b border-destructive/30">
-                                        <div className="w-5 h-5 rounded-full bg-destructive/20 flex items-center justify-center">
-                                            <X className="w-3 h-3 text-destructive" />
+                                                <Trash2 className="w-2.5 h-2.5" />
+                                                Clear all guardrails
+                                            </button>
                                         </div>
-                                        <span className="text-xs font-semibold uppercase tracking-wider text-destructive">Guardrail Blocked</span>
+                                    )}
+                                </div>
+                            );
+                        })()}
+
+                        <Button
+                            variant="outline"
+                            size="sm"
+                            className="w-full"
+                            onClick={() => setMessages([])}
+                        >
+                            <Trash2 className="w-4 h-4 mr-2" />
+                            Clear Chat
+                        </Button>
+
+                    </CardContent>
+                </Card>
+
+                {/* Chat Area */}
+                <Card className="lg:col-span-3 flex flex-col h-[calc(100vh-14rem)]">
+                    <CardContent className="flex-1 overflow-y-auto p-4 space-y-4">
+                        {messages.length === 0 && (
+                            <div className="flex flex-col items-center justify-center h-full text-muted-foreground">
+                                <Bot className="w-12 h-12 mb-4 opacity-30" />
+                                <p className="text-sm font-medium">Send a message to start the conversation</p>
+                                <p className="text-xs mt-2 max-w-md text-center">
+                                    Your messages are sent through the AI Gateway to the selected LLM provider.
+                                    Each response includes a trace ID for debugging in the Observability tab.
+                                </p>
+                            </div>
+                        )}
+                        {messages.map((msg, i) => (
+                            <div
+                                key={i}
+                                className={`flex gap-3 ${msg.role === "user" ? "justify-end" : "justify-start"}`}
+                            >
+                                {msg.role !== "user" && (
+                                    <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+                                        <Bot className="w-4 h-4 text-primary" />
                                     </div>
                                 )}
-                                <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
-                                <div className="flex items-center gap-2 mt-2">
-                                    <span className="text-[10px] opacity-60">
-                                        {msg.timestamp.toLocaleTimeString()}
-                                    </span>
-                                    {msg.trace_id && (
-                                        <Badge variant="outline" className="text-[10px] h-4">
-                                            {msg.trace_id.slice(0, 8)}
-                                        </Badge>
+                                <div
+                                    className={`max-w-[80%] rounded-xl p-4 ${msg.role === "user"
+                                        ? "bg-primary text-primary-foreground"
+                                        : msg.guardrail_blocked
+                                            ? "bg-destructive/10 border border-destructive/30"
+                                            : "bg-secondary"
+                                        }`}
+                                >
+                                    {msg.guardrail_blocked && (
+                                        <div className="flex items-center gap-2 mb-2 pb-2 border-b border-destructive/30">
+                                            <div className="w-5 h-5 rounded-full bg-destructive/20 flex items-center justify-center">
+                                                <X className="w-3 h-3 text-destructive" />
+                                            </div>
+                                            <span className="text-xs font-semibold uppercase tracking-wider text-destructive">Guardrail Blocked</span>
+                                        </div>
                                     )}
-                                    {msg.usage && (
+                                    <p className="text-sm whitespace-pre-wrap">{msg.content}</p>
+                                    <div className="flex items-center gap-2 mt-2">
                                         <span className="text-[10px] opacity-60">
-                                            {msg.usage.total_tokens} tokens
+                                            {msg.timestamp.toLocaleTimeString()}
                                         </span>
-                                    )}
-                                    <button
-                                        onClick={() => copyToClipboard(msg.content, `msg-${i}`)}
-                                        className="opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
-                                    >
-                                        {copied === `msg-${i}` ? (
-                                            <Check className="w-3 h-3" />
-                                        ) : (
-                                            <Copy className="w-3 h-3" />
+                                        {msg.trace_id && (
+                                            <Badge variant="outline" className="text-[10px] h-4">
+                                                {msg.trace_id.slice(0, 8)}
+                                            </Badge>
                                         )}
-                                    </button>
+                                        {msg.usage && (
+                                            <span className="text-[10px] opacity-60">
+                                                {msg.usage.total_tokens} tokens
+                                            </span>
+                                        )}
+                                        <button
+                                            onClick={() => copyToClipboard(msg.content, `msg-${i}`)}
+                                            className="opacity-40 hover:opacity-100 transition-opacity cursor-pointer"
+                                        >
+                                            {copied === `msg-${i}` ? (
+                                                <Check className="w-3 h-3" />
+                                            ) : (
+                                                <Copy className="w-3 h-3" />
+                                            )}
+                                        </button>
+                                    </div>
+                                </div>
+                                {msg.role === "user" && (
+                                    <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
+                                        <User className="w-4 h-4 text-accent" />
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                        {loading && (
+                            <div className="flex gap-3">
+                                <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
+                                    <Bot className="w-4 h-4 text-primary" />
+                                </div>
+                                <div className="bg-secondary rounded-xl p-4">
+                                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
                                 </div>
                             </div>
-                            {msg.role === "user" && (
-                                <div className="w-8 h-8 rounded-lg bg-accent/10 flex items-center justify-center shrink-0">
-                                    <User className="w-4 h-4 text-accent" />
-                                </div>
-                            )}
-                        </div>
-                    ))}
-                    {loading && (
-                        <div className="flex gap-3">
-                            <div className="w-8 h-8 rounded-lg bg-primary/10 flex items-center justify-center">
-                                <Bot className="w-4 h-4 text-primary" />
-                            </div>
-                            <div className="bg-secondary rounded-xl p-4">
-                                <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                            </div>
-                        </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                </CardContent>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </CardContent>
 
-                {/* Input */}
-                <div className="p-4 border-t border-border">
-                    <form
-                        onSubmit={(e) => {
-                            e.preventDefault();
-                            sendMessage();
-                        }}
-                        className="flex gap-2"
-                    >
-                        <Input
-                            value={input}
-                            onChange={(e) => setInput(e.target.value)}
-                            placeholder="Type your message..."
-                            disabled={loading}
-                            className="flex-1"
-                        />
-                        <Button type="submit" disabled={loading || !input.trim()}>
-                            {loading ? (
-                                <Loader2 className="w-4 h-4 animate-spin" />
-                            ) : (
-                                <Send className="w-4 h-4" />
-                            )}
-                        </Button>
-                    </form>
-                </div>
-            </Card>
-        </div>
-
-        {/* Quick Tips — visible when scrolling below the chat area */}
-        <div className="mt-6 p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2 mb-3">
-                <Lightbulb className="w-4 h-4 text-primary" />
-                <span className="font-medium text-sm text-primary">Quick Tips</span>
+                    {/* Input */}
+                    <div className="p-4 border-t border-border">
+                        <form
+                            onSubmit={(e) => {
+                                e.preventDefault();
+                                sendMessage();
+                            }}
+                            className="flex gap-2"
+                        >
+                            <Input
+                                value={input}
+                                onChange={(e) => setInput(e.target.value)}
+                                placeholder="Type your message..."
+                                disabled={loading}
+                                className="flex-1"
+                            />
+                            <Button type="submit" disabled={loading || !input.trim()}>
+                                {loading ? (
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                ) : (
+                                    <Send className="w-4 h-4" />
+                                )}
+                            </Button>
+                        </form>
+                    </div>
+                </Card>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                <div className="space-y-3">
-                    <div className="flex items-start gap-2">
-                        <Bot className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Provider</strong> — select which LLM service to use. Configure in <a href="/configuration/providers" className="text-primary underline">Providers</a></p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                        <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Model</strong> — exact model name, e.g. <code className="bg-secondary px-1 rounded">gemma-3-12b-it</code></p>
-                    </div>
+
+            {/* Quick Tips — visible when scrolling below the chat area */}
+            <div className="mt-6 p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm text-primary">Quick Tips</span>
                 </div>
-                <div className="space-y-3">
-                    <div className="flex items-start gap-2">
-                        <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Temperature</strong> — randomness: 0 = precise, 1 = creative, 2 = random</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-3">
+                        <div className="flex items-start gap-2">
+                            <Bot className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Provider</strong> — select which LLM service to use. Configure in <a href="/configuration/providers" className="text-primary underline">Providers</a></p>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Model</strong> — exact model name, e.g. <code className="bg-secondary px-1 rounded">gemma-3-12b-it</code></p>
+                        </div>
                     </div>
-                    <div className="flex items-start gap-2">
-                        <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Max Tokens</strong> — limits response length. Higher = longer but costlier</p>
+                    <div className="space-y-3">
+                        <div className="flex items-start gap-2">
+                            <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Temperature</strong> — randomness: 0 = precise, 1 = creative, 2 = random</p>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <MessageSquare className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Max Tokens</strong> — limits response length. Higher = longer but costlier</p>
+                        </div>
                     </div>
-                </div>
-                <div className="space-y-3">
-                    <div className="flex items-start gap-2">
-                        <X className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Guardrails</strong> — filter harmful content. Manage in <a href="/configuration/policies" className="text-primary underline">Policies</a></p>
-                    </div>
-                    <div className="flex items-start gap-2">
-                        <Copy className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Trace ID</strong> — unique ID per response, find in <a href="/observability" className="text-primary underline">Observability</a></p>
+                    <div className="space-y-3">
+                        <div className="flex items-start gap-2">
+                            <X className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Guardrails</strong> — filter harmful content. Manage in <a href="/configuration/policies" className="text-primary underline">Policies</a></p>
+                        </div>
+                        <div className="flex items-start gap-2">
+                            <Copy className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                            <p><strong>Trace ID</strong> — unique ID per response, find in <a href="/observability" className="text-primary underline">Observability</a></p>
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
         </>
     );
 }
@@ -659,31 +792,31 @@ function JsonTesterTab() {
                 </CardContent>
             </Card>
 
-        {/* Quick Tips */}
-        <div className="col-span-full p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
-            <div className="flex items-center gap-2 mb-3">
-                <Lightbulb className="w-4 h-4 text-primary" />
-                <span className="font-medium text-sm text-primary">Quick Tips</span>
+            {/* Quick Tips */}
+            <div className="col-span-full p-4 rounded-lg border border-primary/20 bg-primary/5 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 mb-3">
+                    <Lightbulb className="w-4 h-4 text-primary" />
+                    <span className="font-medium text-sm text-primary">Quick Tips</span>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    <div className="flex items-start gap-2">
+                        <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Provider:</strong> Select which LLM service to send the request through. Must be configured in Providers.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Method + Path:</strong> POST /chat/completions is the standard chat endpoint. Try GET /models to list available models.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Body:</strong> JSON payload sent to the provider. Must include "model" and "messages" for chat requests.</p>
+                    </div>
+                    <div className="flex items-start gap-2">
+                        <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
+                        <p><strong>Response:</strong> Shows HTTP status code, response headers, and the full response body from the provider.</p>
+                    </div>
+                </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="flex items-start gap-2">
-                    <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                    <p><strong>Provider:</strong> Select which LLM service to send the request through. Must be configured in Providers.</p>
-                </div>
-                <div className="flex items-start gap-2">
-                    <Send className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                    <p><strong>Method + Path:</strong> POST /chat/completions is the standard chat endpoint. Try GET /models to list available models.</p>
-                </div>
-                <div className="flex items-start gap-2">
-                    <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                    <p><strong>Body:</strong> JSON payload sent to the provider. Must include "model" and "messages" for chat requests.</p>
-                </div>
-                <div className="flex items-start gap-2">
-                    <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                    <p><strong>Response:</strong> Shows HTTP status code, response headers, and the full response body from the provider.</p>
-                </div>
-            </div>
-        </div>
         </div>
     );
 }
