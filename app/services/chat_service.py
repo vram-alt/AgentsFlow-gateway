@@ -48,7 +48,15 @@ class ChatService:
         trace_id = str(uuid.uuid4())
         result: UnifiedResponse | GatewayError
 
-        # ── Step 1: Fetch provider credentials ───────────────
+        prompt = UnifiedPrompt(
+            trace_id=trace_id,
+            model=model,
+            messages=[MessageItem(**m) for m in messages],
+            temperature=temperature,
+            max_tokens=max_tokens,
+            guardrail_ids=guardrail_ids if guardrail_ids is not None else [],
+        )
+
         try:
             provider_record = await self.provider_repo.get_active_by_name(provider_name)
         except Exception as exc:
@@ -72,16 +80,6 @@ class ChatService:
 
         api_key: str = provider_record.api_key
         base_url: str = provider_record.base_url
-
-        # ── Step 2: Build UnifiedPrompt ────────────────────────
-        prompt = UnifiedPrompt(
-            trace_id=trace_id,
-            model=model,
-            messages=[MessageItem(**m) for m in messages],
-            temperature=temperature,
-            max_tokens=max_tokens,
-            guardrail_ids=guardrail_ids if guardrail_ids is not None else [],
-        )
 
         # ── Step 3: Send via adapter ────────────────────────────
         try:

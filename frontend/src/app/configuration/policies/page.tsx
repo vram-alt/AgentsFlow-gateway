@@ -48,6 +48,12 @@ function humanError(err: unknown): string {
     return "An unexpected error occurred. Please try again later.";
 }
 
+function getPrimaryProviderName(providers: { name: string; is_active: boolean }[]): string {
+    return providers.find((provider) => provider.name.toLowerCase() === "portkey")?.name
+        ?? providers[0]?.name
+        ?? "portkey";
+}
+
 export default function PoliciesPage() {
     const [policies, setPolicies] = useState<Policy[]>([]);
     const [providers, setProviders] = useState<{ name: string, is_active: boolean }[]>([]);
@@ -90,8 +96,10 @@ export default function PoliciesPage() {
             const data = await api.listPolicies();
             setPolicies(Array.isArray(data) ? data : []);
 
-            const providersData = await api.listProviders();
-            setProviders(Array.isArray(providersData) ? providersData : []);
+            const providersResponse = await api.listProviders();
+            const providersData = Array.isArray(providersResponse) ? providersResponse : [];
+            setProviders(providersData);
+            setFormData((prev) => ({ ...prev, provider_name: getPrimaryProviderName(providersData) }));
 
             // Auto-detect cloud mode ONLY if user has never manually chosen a tab
             if (typeof window !== "undefined" && localStorage.getItem("policies_cloud_mode") === null) {
@@ -119,7 +127,7 @@ export default function PoliciesPage() {
 
     const openCreate = () => {
         setEditingPolicy(null);
-        setFormData({ name: "", body: '{\n  "checks": [\n    {\n      "id": "default.regexMatch",\n      "parameters": {\n        "rule": "block-word",\n        "pattern": "badword"\n      }\n    }\n  ],\n  "actions": {\n    "onFail": "block",\n    "onPass": "allow"\n  }\n}', provider_name: "portkey" });
+        setFormData({ name: "", body: '{\n  "checks": [\n    {\n      "id": "default.regexMatch",\n      "parameters": {\n        "rule": "block-word",\n        "pattern": "badword"\n      }\n    }\n  ],\n  "actions": {\n    "onFail": "block",\n    "onPass": "allow"\n  }\n}', provider_name: getPrimaryProviderName(providers) });
         setError(null);
         setDialogOpen(true);
     };
@@ -463,14 +471,9 @@ export default function PoliciesPage() {
                                         setFormData({ ...formData, provider_name: e.target.value })
                                     }
                                 >
-                                    {providers.map((p) => (
-                                        <option key={p.name} value={p.name}>
-                                            {p.name} {p.is_active ? "" : "(Inactive)"}
-                                        </option>
-                                    ))}
-                                    {providers.length === 0 && (
-                                        <option value="portkey">Portkey</option>
-                                    )}
+                                    <option value={getPrimaryProviderName(providers)}>
+                                        Portkey
+                                    </option>
                                 </Select>
                             </div>
                         )}

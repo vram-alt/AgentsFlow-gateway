@@ -44,7 +44,9 @@ export default function ProvidersPage() {
     const [formData, setFormData] = useState({
         name: "",
         portkey_api_key: "",
-        virtual_key: "",
+        vk_google: "",
+        vk_openai: "",
+        vk_anthropic: "",
         provider_api_key: "",
         base_url: "",
     });
@@ -71,9 +73,11 @@ export default function ProvidersPage() {
         setEditingProvider(null);
         setConnectionType("cloud");
         setFormData({
-            name: "",
+            name: "portkey",
             portkey_api_key: "",
-            virtual_key: "",
+            vk_google: "",
+            vk_openai: "",
+            vk_anthropic: "",
             provider_api_key: "",
             base_url: "https://api.portkey.ai/v1",
         });
@@ -90,20 +94,34 @@ export default function ProvidersPage() {
         if (isCloud || hasVirtualKey) {
             setConnectionType("cloud");
             const parts = (provider.api_key || "").split("::");
+            const vkPart = parts[1] || "";
+            let vkGoogle = "", vkOpenai = "", vkAnthropic = "";
+            if (vkPart.includes("=")) {
+                for (const pair of vkPart.split(",")) {
+                    const [k, v] = pair.split("=", 2);
+                    if (k?.trim() === "google") vkGoogle = v?.trim() || "";
+                    if (k?.trim() === "openai") vkOpenai = v?.trim() || "";
+                    if (k?.trim() === "anthropic") vkAnthropic = v?.trim() || "";
+                }
+            }
             setFormData({
-                name: provider.name,
-                portkey_api_key: "",  // Don't show existing key
-                virtual_key: parts[1] || "",
+                name: "portkey",
+                portkey_api_key: "",
+                vk_google: vkGoogle,
+                vk_openai: vkOpenai,
+                vk_anthropic: vkAnthropic,
                 provider_api_key: "",
                 base_url: provider.base_url,
             });
         } else {
             setConnectionType("selfhosted");
             setFormData({
-                name: provider.name,
+                name: "portkey",
                 portkey_api_key: "",
-                virtual_key: "",
-                provider_api_key: "",  // Don't show existing key
+                vk_google: "",
+                vk_openai: "",
+                vk_anthropic: "",
+                provider_api_key: "",
                 base_url: provider.base_url,
             });
         }
@@ -119,15 +137,19 @@ export default function ProvidersPage() {
             let finalBaseUrl: string;
 
             if (connectionType === "cloud") {
-                // Cloud mode: combine portkey_api_key and virtual_key
+                // Cloud mode: combine portkey_api_key and virtual keys per LLM provider
                 if (!editingProvider && !formData.portkey_api_key) {
                     setError("Portkey API Key is required");
                     setSaving(false);
                     return;
                 }
                 finalApiKey = formData.portkey_api_key;
-                if (formData.virtual_key.trim()) {
-                    finalApiKey = `${formData.portkey_api_key}::${formData.virtual_key.trim()}`;
+                const vkParts: string[] = [];
+                if (formData.vk_google.trim()) vkParts.push(`google=${formData.vk_google.trim()}`);
+                if (formData.vk_openai.trim()) vkParts.push(`openai=${formData.vk_openai.trim()}`);
+                if (formData.vk_anthropic.trim()) vkParts.push(`anthropic=${formData.vk_anthropic.trim()}`);
+                if (vkParts.length > 0) {
+                    finalApiKey = `${formData.portkey_api_key}::${vkParts.join(",")}`;
                 }
                 finalBaseUrl = formData.base_url || "https://api.portkey.ai/v1";
             } else {
@@ -143,18 +165,13 @@ export default function ProvidersPage() {
 
             if (editingProvider) {
                 await api.updateProvider(editingProvider.id, {
-                    name: formData.name || null,
+                    name: "portkey",
                     api_key: finalApiKey || null,
                     base_url: finalBaseUrl || null,
                 });
             } else {
-                if (!formData.name) {
-                    setError("Name is required");
-                    setSaving(false);
-                    return;
-                }
                 await api.createProvider({
-                    name: formData.name,
+                    name: "portkey",
                     api_key: finalApiKey,
                     base_url: finalBaseUrl,
                 });
@@ -194,12 +211,19 @@ export default function ProvidersPage() {
         return "selfhosted";
     };
 
-    /** Extract virtual key slug from api_key if present */
-    const getVirtualKey = (provider: Provider): string | null => {
-        if (provider.api_key?.includes("::")) {
-            return provider.api_key.split("::")[1] || null;
+    /** Extract virtual key info from api_key if present */
+    const getVirtualKeys = (provider: Provider): Record<string, string> => {
+        if (!provider.api_key?.includes("::")) return {};
+        const vkPart = provider.api_key.split("::")[1] || "";
+        if (vkPart.includes("=")) {
+            const result: Record<string, string> = {};
+            for (const pair of vkPart.split(",")) {
+                const [k, v] = pair.split("=", 2);
+                if (k && v) result[k.trim()] = v.trim();
+            }
+            return result;
         }
-        return null;
+        return { _default: vkPart };
     };
 
     return (
@@ -241,7 +265,7 @@ export default function ProvidersPage() {
                 {!loading &&
                     providers.map((provider) => {
                         const provType = getProviderType(provider);
-                        const vk = getVirtualKey(provider);
+                        const vks = getVirtualKeys(provider);
                         return (
                             <Card
                                 key={provider.id}
@@ -317,10 +341,17 @@ export default function ProvidersPage() {
                                         <Key className="w-3.5 h-3.5" />
                                         <span>••••••••{provider.api_key?.split("::")[0]?.slice(-4) || "••••"}</span>
                                     </div>
-                                    {vk && (
-                                        <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                                            <Cloud className="w-3.5 h-3.5" />
-                                            <span>Virtual Key: <code className="text-xs bg-secondary px-1 py-0.5 rounded">{vk}</code></span>
+                                    {Object.keys(vks).length > 0 && (
+                                        <div className="space-y-1">
+                                            {Object.entries(vks).map(([prov, slug]) => (
+                                                <div key={prov} className="flex items-center gap-2 text-sm text-muted-foreground">
+                                                    <Cloud className="w-3.5 h-3.5" />
+                                                    <span>
+                                                        {prov === "_default" ? "Virtual Key" : prov}:{" "}
+                                                        <code className="text-xs bg-secondary px-1 py-0.5 rounded">{slug}</code>
+                                                    </span>
+                                                </div>
+                                            ))}
                                         </div>
                                     )}
                                     <div className="text-xs text-muted-foreground pt-2">
@@ -406,10 +437,13 @@ export default function ProvidersPage() {
                         <div className="space-y-2">
                             <label className="text-sm font-medium">Name</label>
                             <Input
-                                value={formData.name}
-                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                placeholder="e.g. portkey"
+                                value="portkey"
+                                readOnly
+                                className="bg-muted"
                             />
+                            <p className="text-[11px] text-muted-foreground">
+                                The provider name is fixed to <code className="bg-secondary px-1 rounded">portkey</code>.
+                            </p>
                         </div>
 
                         {/* Cloud Mode Fields */}
@@ -429,16 +463,40 @@ export default function ProvidersPage() {
                                     </p>
                                 </div>
                                 <div className="space-y-2">
-                                    <label className="text-sm font-medium">Virtual Key Slug</label>
-                                    <Input
-                                        value={formData.virtual_key}
-                                        onChange={(e) => setFormData({ ...formData, virtual_key: e.target.value })}
-                                        placeholder="e.g. test"
-                                    />
+                                    <label className="text-sm font-medium">Virtual Key Slugs</label>
                                     <p className="text-[11px] text-muted-foreground flex items-start gap-1">
                                         <Info className="w-3 h-3 mt-0.5 shrink-0" />
-                                        Enter the slug of your Virtual Key from Portkey dashboard (Portkey → AI Providers). This is required for Portkey Cloud to route requests to the correct LLM provider.
+                                        Enter the slug for each LLM provider from your Portkey AI Providers dashboard.
                                     </p>
+                                    <div className="grid gap-2">
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs text-muted-foreground w-20 shrink-0">Google</label>
+                                            <Input
+                                                value={formData.vk_google}
+                                                onChange={(e) => setFormData({ ...formData, vk_google: e.target.value })}
+                                                placeholder="e.g. dev"
+                                                className="h-8 text-sm"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs text-muted-foreground w-20 shrink-0">OpenAI</label>
+                                            <Input
+                                                value={formData.vk_openai}
+                                                onChange={(e) => setFormData({ ...formData, vk_openai: e.target.value })}
+                                                placeholder="e.g. dev-openai"
+                                                className="h-8 text-sm"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs text-muted-foreground w-20 shrink-0">Anthropic</label>
+                                            <Input
+                                                value={formData.vk_anthropic}
+                                                onChange={(e) => setFormData({ ...formData, vk_anthropic: e.target.value })}
+                                                placeholder="e.g. dev-anthropic"
+                                                className="h-8 text-sm"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             </>
                         )}

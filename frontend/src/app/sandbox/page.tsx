@@ -38,6 +38,47 @@ interface ChatMessage {
     guardrail_details?: GuardrailDetails | null;
 }
 
+function getPrimaryProvider(providers: Provider[]): Provider | null {
+    return (
+        providers.find((provider) => provider.name.toLowerCase() === "portkey") ??
+        providers[0] ??
+        null
+    );
+}
+
+function getSuggestedProviderName(_model: string, providers: Provider[]): string | null {
+    return getPrimaryProvider(providers)?.name ?? null;
+}
+
+const PORTKEY_MODEL_GROUPS = [
+    {
+        label: "Google",
+        options: [
+            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+            { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+            { value: "gemini-flash-latest", label: "Gemini Flash (Latest)" },
+        ],
+    },
+    {
+        label: "OpenAI",
+        options: [
+            { value: "gpt-4o", label: "GPT-4o" },
+            { value: "gpt-4.1", label: "GPT-4.1" },
+            { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+        ],
+    },
+    {
+        label: "Anthropic",
+        options: [
+            { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+            { value: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet" },
+            { value: "claude-haiku-4-5-20250929", label: "Claude Haiku 4.5" },
+        ],
+    },
+
+] as const;
+
 export default function SandboxPage() {
     return (
         <div className="space-y-6 animate-fade-in">
@@ -74,7 +115,7 @@ export default function SandboxPage() {
 function ChatTab() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
-    const [model, setModel] = useState("gemma-3-12b-it");
+    const [model, setModel] = useState("gemini-2.5-flash");
     const [provider, setProvider] = useState("portkey");
     const [temperature, setTemperature] = useState("0.7");
     const [maxTokens, setMaxTokens] = useState("1024");
@@ -89,16 +130,17 @@ function ChatTab() {
     const [guardrailMode, setGuardrailMode] = useState<"cloud" | "local">("cloud");
 
     useEffect(() => {
-        // Load active providers
         api.listProviders()
             .then((data) => {
                 const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
-                setProviders(active);
-                if (active.length > 0 && !active.find((p) => p.name === provider)) {
-                    setProvider(active[0].name);
-                }
+                const primaryProvider = getPrimaryProvider(active);
+                setProviders(primaryProvider ? [primaryProvider] : []);
+                setProvider(primaryProvider?.name ?? "portkey");
             })
-            .catch(() => setProviders([]));
+            .catch(() => {
+                setProviders([]);
+                setProvider("portkey");
+            });
 
         // Load all active policies (both cloud and local)
         api.listPolicies()
@@ -268,11 +310,11 @@ function ChatTab() {
                             <label className="text-sm text-muted-foreground">Provider</label>
                             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
                                 {providers.length === 0 && (
-                                    <option value="portkey">Portkey (default)</option>
+                                    <option value="portkey">Portkey</option>
                                 )}
                                 {providers.map((p) => (
                                     <option key={p.id} value={p.name}>
-                                        {p.name}
+                                        Portkey
                                     </option>
                                 ))}
                             </Select>
@@ -280,12 +322,27 @@ function ChatTab() {
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm text-muted-foreground">Model</label>
-                            <Input
+                            <Select
                                 value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                placeholder="gemma-3-12b-it"
-                            />
-
+                                onChange={(e) => {
+                                    const nextModel = e.target.value;
+                                    setModel(nextModel);
+                                    const suggestedProvider = getSuggestedProviderName(nextModel, providers);
+                                    if (suggestedProvider) {
+                                        setProvider(suggestedProvider);
+                                    }
+                                }}
+                            >
+                                {PORTKEY_MODEL_GROUPS.map((group) => (
+                                    <optgroup key={group.label} label={group.label}>
+                                        {group.options.map((option) => (
+                                            <option key={option.value} value={option.value}>
+                                                {option.label}
+                                            </option>
+                                        ))}
+                                    </optgroup>
+                                ))}
+                            </Select>
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm text-muted-foreground">Temperature</label>
@@ -565,7 +622,7 @@ function ChatTab() {
                         </div>
                         <div className="flex items-start gap-2">
                             <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                            <p><strong>Model</strong> — exact model name, e.g. <code className="bg-secondary px-1 rounded">gemma-3-12b-it</code></p>
+                            <p><strong>Model</strong> — choose a supported Portkey model such as <code className="bg-secondary px-1 rounded">gemini-2.5-flash</code></p>
                         </div>
                     </div>
                     <div className="space-y-3">
@@ -604,7 +661,7 @@ function JsonTesterTab() {
     const [body, setBody] = useState(
         JSON.stringify(
             {
-                model: "gemma-3-12b-it",
+                model: "gemini-2.5-flash",
                 messages: [{ role: "user", content: "Hello!" }],
                 temperature: 0.7,
             },
@@ -621,12 +678,14 @@ function JsonTesterTab() {
         api.listProviders()
             .then((data) => {
                 const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
-                setProviders(active);
-                if (active.length > 0 && !active.find((p) => p.name === provider)) {
-                    setProvider(active[0].name);
-                }
+                const primaryProvider = getPrimaryProvider(active);
+                setProviders(primaryProvider ? [primaryProvider] : []);
+                setProvider(primaryProvider?.name ?? "portkey");
             })
-            .catch(() => setProviders([]));
+            .catch(() => {
+                setProviders([]);
+                setProvider("portkey");
+            });
     }, []);
 
     const sendRequest = async () => {
@@ -684,11 +743,11 @@ function JsonTesterTab() {
                             <label className="text-xs text-muted-foreground">Provider</label>
                             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
                                 {providers.length === 0 && (
-                                    <option value="portkey">Portkey (default)</option>
+                                    <option value="portkey">Portkey</option>
                                 )}
                                 {providers.map((p) => (
                                     <option key={p.id} value={p.name}>
-                                        {p.name}
+                                        Portkey
                                     </option>
                                 ))}
                             </Select>

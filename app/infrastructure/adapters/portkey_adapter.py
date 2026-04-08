@@ -62,35 +62,62 @@ _MODEL_PROVIDER_PREFIXES: list[tuple[str, str]] = [
     ("deepseek-", "deepseek"),
 ]
 
+_EXPLICIT_PROVIDER_ALIASES: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "groq": "groq",
+    "google": "google",
+    "cohere": "cohere",
+    "mistral": "mistral-ai",
+    "mistral-ai": "mistral-ai",
+    "deepseek": "deepseek",
+}
+
 
 def _infer_provider_from_model(model: str) -> str:
     """Infer the LLM provider slug from the model name for x-portkey-provider header.
 
     Falls back to 'openai' if no prefix matches (most common case).
     """
-    model_lower = model.lower()
+    model_lower = model.lower().strip()
+
+    if model_lower.startswith("@") and "/" in model_lower:
+        explicit_provider, remainder = model_lower[1:].split("/", 1)
+        if explicit_provider in _EXPLICIT_PROVIDER_ALIASES:
+            return _EXPLICIT_PROVIDER_ALIASES[explicit_provider]
+        model_lower = remainder
+
     for prefix, provider in _MODEL_PROVIDER_PREFIXES:
         if model_lower.startswith(prefix):
             return provider
     return "openai"
 
 
-def _parse_api_key(api_key: str) -> tuple[str, str | None]:
-    """Parse api_key field to extract Portkey API key and optional virtual key slug.
+def _parse_api_key(api_key: str) -> tuple[str, dict[str, str]]:
+    """Parse api_key field to extract Portkey API key and virtual key mapping.
 
-    Supports two formats:
-    1. Plain Portkey API key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5"
-       -> returns (portkey_api_key, None)
-    2. Portkey API key with virtual key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5::test"
-       -> returns (portkey_api_key, "test")
+    Supports three formats:
+    1. Plain Portkey API key: "KEY"
+       -> returns (KEY, {})
+    2. Single virtual key (legacy): "KEY::slug"
+       -> returns (KEY, {"_default": "slug"})
+    3. Multi virtual keys: "KEY::google=dev,anthropic=dev-anthropic,openai=dev-openai"
+       -> returns (KEY, {"google": "dev", "anthropic": "dev-anthropic", ...})
 
-    The '::' separator is used because neither Portkey API keys nor
-    virtual key slugs contain this sequence.
+    Format 3 is detected when the part after '::' contains '='.
     """
-    if "::" in api_key:
-        parts = api_key.split("::", 1)
-        return parts[0], parts[1]
-    return api_key, None
+    if "::" not in api_key:
+        return api_key, {}
+    portkey_key, vk_part = api_key.split("::", 1)
+    if "=" in vk_part:
+        mapping: dict[str, str] = {}
+        for pair in vk_part.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                provider_slug, vk_slug = pair.split("=", 1)
+                mapping[provider_slug.strip()] = vk_slug.strip()
+        return portkey_key, mapping
+    return portkey_key, {"_default": vk_part}
 
 
 class PortkeyAdapter(GatewayProvider):
@@ -113,10 +140,10 @@ class PortkeyAdapter(GatewayProvider):
         self, prompt: UnifiedPrompt, api_key: str, base_url: str
     ) -> Union[UnifiedResponse, GatewayError]:
         try:
-            portkey_key, virtual_key = _parse_api_key(api_key)
+            portkey_key, virtual_keys = _parse_api_key(api_key)
             llm_provider = _infer_provider_from_model(prompt.model)
             headers = self._build_headers(
-                portkey_key, llm_provider=llm_provider, virtual_key=virtual_key
+                portkey_key, llm_provider=llm_provider, virtual_keys=virtual_keys
             )
             headers["x-portkey-trace-id"] = prompt.trace_id
             if prompt.guardrail_ids:
@@ -257,7 +284,15 @@ class PortkeyAdapter(GatewayProvider):
         When DEMO_MODE=true, the adapter returns simulated responses
         instead of errors when no valid LLM API key is configured.
         """
-        return os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes")
+        env_value = os.environ.get("DEMO_MODE")
+        if env_value is not None:
+            return env_value.lower() in ("true", "1", "yes")
+        try:
+            from app.config import get_settings
+
+            return bool(get_settings().demo_mode)
+        except Exception:
+            return False
 
     @staticmethod
     def _demo_response(prompt: UnifiedPrompt) -> UnifiedResponse:
@@ -409,20 +444,23 @@ class PortkeyAdapter(GatewayProvider):
         self,
         api_key: str,
         llm_provider: str = "openai",
-        virtual_key: str | None = None,
+        virtual_keys: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Build the standard set of HTTP headers for the Portkey API.
 
-        If virtual_key is provided, uses x-portkey-virtual-key header
-        (Portkey routes to the correct provider via the virtual key config).
-        Otherwise, uses x-portkey-provider header for direct provider routing.
+        virtual_keys maps provider slugs to virtual-key slugs.
+        Picks the virtual key matching llm_provider, falls back to '_default'.
         """
         headers: dict[str, str] = {
             "x-portkey-api-key": api_key,
             "Content-Type": "application/json",
         }
-        if virtual_key:
-            headers["x-portkey-virtual-key"] = virtual_key
+        if virtual_keys:
+            vk = virtual_keys.get(llm_provider) or virtual_keys.get("_default")
+            if vk:
+                headers["x-portkey-virtual-key"] = vk
+            else:
+                headers["x-portkey-provider"] = llm_provider
         else:
             headers["x-portkey-provider"] = llm_provider
         return headers
