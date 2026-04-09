@@ -1,11 +1,15 @@
 /**
- * Centralized API client for AI Gateway backend (http://127.0.0.1:8000).
- * All 22 endpoints covered.
+ * Centralized API client for AI Gateway backend.
+ * Uses same-origin `/api` requests in the browser to avoid CORS issues.
  */
 
 import { getStoredAuthToken } from "@/lib/auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const SERVER_API_BASE =
+    process.env.INTERNAL_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000";
+const API_BASE = typeof window === "undefined" ? SERVER_API_BASE : "";
 
 // ─── Auth header (HTTP Basic Auth) ──────────────────────────────────────
 function getHeaders(): HeadersInit {
@@ -300,9 +304,9 @@ export const api = {
         }),
 
     // Providers
-    listProviders: () => apiFetch<Provider[]>("/api/providers/"),
+    listProviders: () => apiFetch<Provider[]>("/api/providers"),
     createProvider: (data: ProviderCreateRequest) =>
-        apiFetch<Provider>("/api/providers/", {
+        apiFetch<Provider>("/api/providers", {
             method: "POST",
             body: JSON.stringify(data),
         }),
@@ -323,9 +327,9 @@ export const api = {
         apiFetch<ProviderHealth[]>("/api/providers/health"),
 
     // Policies
-    listPolicies: () => apiFetch<Policy[]>("/api/policies/"),
+    listPolicies: () => apiFetch<Policy[]>("/api/policies"),
     createPolicy: (data: PolicyCreateRequest) =>
-        apiFetch<Policy>("/api/policies/", {
+        apiFetch<Policy>("/api/policies", {
             method: "POST",
             body: JSON.stringify(data),
         }),
@@ -361,7 +365,7 @@ export const api = {
         if (params?.event_type) searchParams.set("event_type", params.event_type);
         if (params?.trace_id) searchParams.set("trace_id", params.trace_id);
         const qs = searchParams.toString();
-        return apiFetch<LogEntry[]>(`/api/logs/${qs ? `?${qs}` : ""}`);
+        return apiFetch<LogEntry[]>(`/api/logs${qs ? `?${qs}` : ""}`);
     },
     getLogStats: () => apiFetch<LogStats>("/api/logs/stats"),
     getLogsByTraceId: (traceId: string) =>

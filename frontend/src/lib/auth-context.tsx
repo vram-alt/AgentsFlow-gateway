@@ -16,7 +16,11 @@ interface AuthContextType extends AuthState {
 const AuthContext = createContext<AuthContextType | null>(null);
 
 const AUTH_STORAGE_KEY = "agentsflow_auth";
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
+const SERVER_API_BASE =
+    process.env.INTERNAL_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000";
+const API_BASE = typeof window === "undefined" ? SERVER_API_BASE : "";
 
 function encodeCredentials(username: string, password: string): string {
     return typeof btoa === "function"

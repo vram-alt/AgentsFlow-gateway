@@ -13,7 +13,7 @@ services:
     env_file:
       - .env
     environment:
-      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000}
+      - CORS_ORIGINS=${CORS_ORIGINS:-http://localhost:3000,http://127.0.0.1:3000}
     healthcheck:
       test: [ "CMD", "curl", "-f", "http://localhost:8000/health" ]
       interval: 30s
@@ -29,6 +29,7 @@ services:
       dockerfile: Dockerfile
       args:
         NEXT_PUBLIC_API_URL: ${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+        INTERNAL_API_URL: ${INTERNAL_API_URL:-http://backend:8000}
     image: ${FRONTEND_IMAGE_NAME:-ai-gateway-frontend:latest}
     container_name: ai-gateway-frontend
     restart: unless-stopped
@@ -36,6 +37,7 @@ services:
       - "${FRONTEND_PORT:-3000}:3000"
     environment:
       - NEXT_PUBLIC_API_URL=${NEXT_PUBLIC_API_URL:-http://localhost:8000}
+      - INTERNAL_API_URL=${INTERNAL_API_URL:-http://backend:8000}
     depends_on:
       backend:
         condition: service_healthy

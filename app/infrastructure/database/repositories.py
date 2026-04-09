@@ -168,7 +168,7 @@ class PolicyRepository:
         self,
         name: str,
         body: dict,
-        remote_id: str,
+        remote_id: Optional[str],
         provider_id: int,
     ) -> PolicyModel:
         """Create a new policy. body (dict) is serialized to JSON."""

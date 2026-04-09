@@ -205,6 +205,58 @@ class TestUpdatePolicy:
     """Tests for метода update_policy (specification §4)."""
 
     @pytest.mark.asyncio
+    async def test_create_policy_invalid_webhook_url_returns_validation_error(
+        self, service, mock_provider_repo, mock_adapter, mock_policy_repo, fake_provider
+    ):
+        """Webhook/log helper validation should reject malformed custom URLs."""
+        mock_provider_repo.get_active_by_name.return_value = fake_provider
+
+        result = await service.create_policy(
+            name="custom-webhook-policy",
+            body={
+                "checks": [
+                    {
+                        "id": "webhook",
+                        "parameters": {
+                            "webhookURL": "not-a-real-url",
+                        },
+                    }
+                ]
+            },
+        )
+
+        assert isinstance(result, GatewayError)
+        assert result.error_code == "VALIDATION_ERROR"
+        mock_adapter.create_guardrail.assert_not_awaited()
+        mock_policy_repo.create.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_policy_invalid_log_url_returns_validation_error(
+        self, service, mock_policy_repo, mock_adapter, fake_policy
+    ):
+        """Update should reject invalid Portkey log sink configuration early."""
+        mock_policy_repo.get_by_id.return_value = fake_policy
+
+        result = await service.update_policy(
+            policy_id=42,
+            body={
+                "checks": [
+                    {
+                        "id": "log",
+                        "parameters": {
+                            "logURL": "ftp://invalid-log-endpoint",
+                        },
+                    }
+                ]
+            },
+        )
+
+        assert isinstance(result, GatewayError)
+        assert result.error_code == "VALIDATION_ERROR"
+        mock_adapter.update_guardrail.assert_not_awaited()
+
+
+    @pytest.mark.asyncio
     async def test_update_policy_not_found_returns_validation_error(
         self, service, mock_policy_repo
     ):

@@ -11,6 +11,7 @@ import logging
 import uuid
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
@@ -43,6 +44,89 @@ def _make_error(error_code: str, message: str) -> GatewayError:
         message=message,
         status_code=_ERROR_CODE_STATUS.get(error_code, 500),
     )
+
+
+def _validate_http_url(url: Any, field_name: str) -> str | None:
+    """Validate that a guardrail URL is a non-empty http/https endpoint."""
+    if not isinstance(url, str) or not url.strip():
+        return f"{field_name} must be a non-empty http/https URL"
+
+    parsed = urlparse(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return f"{field_name} must be a valid http/https URL"
+    return None
+
+
+def _validate_headers_object(headers: Any, field_name: str) -> str | None:
+    """Validate optional headers for Portkey Webhook / Log checks."""
+    if headers is None:
+        return None
+    if not isinstance(headers, dict):
+        return f"{field_name} must be a JSON object of header names to values"
+
+    for key, value in headers.items():
+        if not isinstance(key, str) or not key.strip():
+            return f"{field_name} keys must be non-empty strings"
+        if not isinstance(value, (str, int, float, bool)):
+            return f"{field_name}['{key}'] must be a string, number, or boolean"
+    return None
+
+
+def _validate_custom_guardrail_body(body: dict[str, Any]) -> str | None:
+    """Validate only the custom Webhook / Log checks without affecting other policies."""
+    checks = body.get("checks")
+    if checks is None:
+        return None
+    if not isinstance(checks, list):
+        return "Policy body field 'checks' must be a list"
+
+    for index, check in enumerate(checks, start=1):
+        if not isinstance(check, dict):
+            return f"Policy check #{index} must be a JSON object"
+
+        check_id = str(check.get("id", "")).strip().lower()
+        parameters = check.get("parameters") or {}
+        if not isinstance(parameters, dict):
+            return f"Policy check #{index} parameters must be a JSON object"
+
+        if "webhook" in check_id:
+            error = _validate_http_url(
+                parameters.get("webhookURL"),
+                f"checks[{index}].parameters.webhookURL",
+            )
+            if error:
+                return error
+            error = _validate_headers_object(
+                parameters.get("headers"),
+                f"checks[{index}].parameters.headers",
+            )
+            if error:
+                return error
+
+        if check_id == "log" or check_id.endswith(".log"):
+            error = _validate_http_url(
+                parameters.get("logURL"),
+                f"checks[{index}].parameters.logURL",
+            )
+            if error:
+                return error
+            error = _validate_headers_object(
+                parameters.get("headers"),
+                f"checks[{index}].parameters.headers",
+            )
+            if error:
+                return error
+
+        for timeout_key in ("timeout", "timeoutMs"):
+            timeout_value = parameters.get(timeout_key)
+            if timeout_value is not None and (
+                not isinstance(timeout_value, int) or timeout_value <= 0
+            ):
+                return (
+                    f"checks[{index}].parameters.{timeout_key} must be a positive integer"
+                )
+
+    return None
 
 
 class PolicyService:
@@ -78,7 +162,12 @@ class PolicyService:
                 f"Provider '{provider_name}' not found or inactive — add it in Configuration > Providers first",
             )
 
-        # 2. Build the cloud config — ensure 'name' is included for Portkey API
+        # 2. Validate custom Webhook / Log checks without changing normal policies
+        validation_error = _validate_custom_guardrail_body(body)
+        if validation_error:
+            return _make_error("VALIDATION_ERROR", validation_error)
+
+        # 3. Build the cloud config — ensure 'name' is included for Portkey API
         cloud_config = dict(body)
         if "name" not in cloud_config:
             cloud_config["name"] = name
@@ -87,15 +176,31 @@ class PolicyService:
         cloud_result = await self.adapter.create_guardrail(
             cloud_config, provider.api_key, provider.base_url
         )
+
+        remote_id: str | None = None
         if isinstance(cloud_result, GatewayError):
-            return cloud_result
+            # If cloud returns 403 (no permission) or 404 (not found),
+            # proceed with local-only save — the API key may not have
+            # write access or the endpoint may not be available.
+            if cloud_result.error_code in ("AUTH_FAILED", "PROVIDER_ERROR"):
+                logger.warning(
+                    "Cloud creation failed for policy '%s': %s — "
+                    "saving locally without remote_id",
+                    name,
+                    cloud_result.message,
+                )
+                remote_id = None
+            else:
+                return cloud_result
+        else:
+            remote_id = cloud_result["remote_id"]
 
         # 4. Save to local DB
         try:
             created = await self.policy_repo.create(
                 name=name,
                 body=body,
-                remote_id=cloud_result["remote_id"],
+                remote_id=remote_id,
                 provider_id=provider.id,
             )
         except Exception as exc:
@@ -121,7 +226,13 @@ class PolicyService:
                 f"Policy with ID {policy_id} not found — it may have been deleted",
             )
 
-        # 2. If body changed and remote_id exists — sync with cloud
+        # 2. Validate custom Webhook / Log checks without affecting other updates
+        if body is not None:
+            validation_error = _validate_custom_guardrail_body(body)
+            if validation_error:
+                return _make_error("VALIDATION_ERROR", validation_error)
+
+        # 3. If body changed and remote_id exists — sync with cloud
         if body is not None and policy.remote_id:
             provider = await self.provider_repo.get_active_by_name("portkey")
             # [RED-2] Guard against None provider
