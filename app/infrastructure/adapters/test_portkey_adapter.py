@@ -51,6 +51,21 @@ def _chat_body() -> dict:
     }
 
 
+def _embedding_body() -> dict:
+    return {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "index": 0,
+                "embedding": [0.123, 0.456, 0.789],
+            }
+        ],
+        "model": "text-embedding-ada-002",
+        "usage": {"prompt_tokens": 3, "total_tokens": 3},
+    }
+
+
 def _prompt(**kw) -> UnifiedPrompt:
     defaults = dict(
         trace_id=TRACE_ID,
@@ -121,6 +136,23 @@ class TestSendPromptSuccess:
         assert "gpt-4" in s
         assert "Hi" in s
 
+    @pytest.mark.asyncio
+    async def test_ada_v2_uses_embeddings_endpoint_and_alias(self):
+        a = PortkeyAdapter()
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            m.return_value = _resp(200, _embedding_body())
+            r = await a.send_prompt(_prompt(model="ada-v2"), API_KEY, BASE_URL)
+
+        assert isinstance(r, UnifiedResponse)
+        assert r.model == "text-embedding-ada-002"
+        assert r.usage is not None
+        assert r.usage.prompt_tokens == 3
+        assert r.usage.completion_tokens == 0
+        assert r.usage.total_tokens == 3
+        call_repr = str(m.call_args)
+        assert "/embeddings" in call_repr
+        assert "text-embedding-ada-002" in call_repr
+
 
 # ===========================================================================
 # 3. Заголовки
@@ -133,6 +165,48 @@ class TestHeaders:
     def test_build_headers_has_content_type(self):
         h = PortkeyAdapter()._build_headers(API_KEY)
         assert h["Content-Type"] == "application/json"
+
+    def test_build_headers_uses_openrouter_virtual_key_when_provider_matches(self):
+        h = PortkeyAdapter()._build_headers(
+            API_KEY,
+            llm_provider="openrouter",
+            virtual_keys={"openrouter": "vk-openrouter"},
+        )
+        assert h["x-portkey-virtual-key"] == "vk-openrouter"
+        assert "x-portkey-provider" not in h
+
+    def test_build_headers_ignores_null_like_openrouter_key(self):
+        h = PortkeyAdapter()._build_headers(
+            API_KEY,
+            llm_provider="openrouter",
+            virtual_keys={"openrouter": "null"},
+        )
+        assert "x-portkey-virtual-key" not in h
+        assert h["x-portkey-provider"] == "openrouter"
+
+    @pytest.mark.asyncio
+    async def test_send_prompt_returns_clear_error_when_openrouter_key_missing(self):
+        a = PortkeyAdapter()
+        prompt = _prompt(model="@openrouter/openai/gpt-4o")
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            r = await a.send_prompt(prompt, "pk-test::google=dev-google,openai=dev-openai", BASE_URL)
+
+        assert isinstance(r, GatewayError)
+        assert r.error_code == GatewayError.AUTH_FAILED
+        assert "OpenRouter" in r.message
+        m.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_prompt_recognizes_openrouter_explicit_provider_alias(self):
+        a = PortkeyAdapter()
+        prompt = _prompt(model="@openrouter/openai/gpt-4o")
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            m.return_value = _resp(200, _chat_body())
+            await a.send_prompt(prompt, "pk-test::openrouter=vk-openrouter", BASE_URL)
+
+        call_repr = str(m.call_args)
+        assert "vk-openrouter" in call_repr
+        assert "x-portkey-provider" not in call_repr or "openrouter" in call_repr
 
     @pytest.mark.asyncio
     async def test_trace_id_in_call(self):

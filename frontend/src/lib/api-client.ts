@@ -1,11 +1,11 @@
 /**
- * Centralized API client for AI Gateway backend (http://localhost:8000).
+ * Centralized API client for AI Gateway backend (http://127.0.0.1:8000).
  * All 22 endpoints covered.
  */
 
 import { getStoredAuthToken } from "@/lib/auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000";
 
 // ─── Auth header (HTTP Basic Auth) ──────────────────────────────────────
 function getHeaders(): HeadersInit {

@@ -65,6 +65,7 @@ const PORTKEY_MODEL_GROUPS = [
             { value: "gpt-4o", label: "GPT-4o" },
             { value: "gpt-4.1", label: "GPT-4.1" },
             { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+            { value: "ada-v2", label: "Ada v2 (Embeddings)" },
         ],
     },
     {
@@ -75,7 +76,14 @@ const PORTKEY_MODEL_GROUPS = [
             { value: "claude-haiku-4-5-20250929", label: "Claude Haiku 4.5" },
         ],
     },
-
+    {
+        label: "OpenRouter",
+        options: [
+            { value: "@openrouter/openai/gpt-4o", label: "OpenRouter · GPT-4o" },
+            { value: "@openrouter/anthropic/claude-3.5-sonnet", label: "OpenRouter · Claude 3.5 Sonnet" },
+            { value: "@openrouter/meta-llama/llama-3.1-8b-instruct", label: "OpenRouter · Llama 3.1 8B" },
+        ],
+    },
 ] as const;
 
 export default function SandboxPage() {
@@ -621,7 +629,7 @@ function ChatTab() {
                         </div>
                         <div className="flex items-start gap-2">
                             <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                            <p><strong>Model</strong> — choose a supported Portkey model such as <code className="bg-secondary px-1 rounded">gemini-2.5-flash</code></p>
+                            <p><strong>Model</strong> — choose a supported Portkey model such as <code className="bg-secondary px-1 rounded">gemini-2.5-flash</code> or <code className="bg-secondary px-1 rounded">@openrouter/openai/gpt-4o</code></p>
                         </div>
                     </div>
                     <div className="space-y-3">
@@ -867,7 +875,7 @@ function JsonTesterTab() {
                     </div>
                     <div className="flex items-start gap-2">
                         <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Body:</strong> JSON payload sent to the provider. Must include "model" and "messages" for chat requests.</p>
+                        <p><strong>Body:</strong> JSON payload sent to the provider. Must include <code className="bg-secondary px-1 rounded">model</code> and <code className="bg-secondary px-1 rounded">messages</code> for chat requests.</p>
                     </div>
                     <div className="flex items-start gap-2">
                         <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />

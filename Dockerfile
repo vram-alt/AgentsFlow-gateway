@@ -52,7 +52,8 @@ RUN mkdir -p /app/data && chown appuser:appuser /app/data
 
 # Copy entrypoint script
 COPY --chown=appuser:appuser docker-entrypoint.sh /app/docker-entrypoint.sh
-RUN chmod +x /app/docker-entrypoint.sh
+# Normalize line endings for Windows checkouts so the script can be executed in Linux containers
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 # Put venv on PATH
 ENV PATH="/app/.venv/bin:$PATH" \

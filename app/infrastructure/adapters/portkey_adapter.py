@@ -67,11 +67,61 @@ _EXPLICIT_PROVIDER_ALIASES: dict[str, str] = {
     "anthropic": "anthropic",
     "groq": "groq",
     "google": "google",
+    "openrouter": "openrouter",
     "cohere": "cohere",
     "mistral": "mistral-ai",
     "mistral-ai": "mistral-ai",
     "deepseek": "deepseek",
 }
+
+_EMBEDDING_MODEL_ALIASES: dict[str, str] = {
+    "ada-v2": "text-embedding-ada-002",
+}
+
+_INVALID_VIRTUAL_KEY_VALUES = {"", "null", "none", "undefined"}
+
+
+def _sanitize_virtual_key(value: str | None) -> str | None:
+    """Normalize blank or null-like virtual-key values to None."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if cleaned.lower() in _INVALID_VIRTUAL_KEY_VALUES:
+        return None
+    return cleaned
+
+
+def _get_virtual_key_for_provider(
+    virtual_keys: dict[str, str] | None, llm_provider: str
+) -> str | None:
+    """Return the matching virtual key for the requested provider, if valid."""
+    if not virtual_keys:
+        return None
+    return _sanitize_virtual_key(virtual_keys.get(llm_provider)) or _sanitize_virtual_key(
+        virtual_keys.get("_default")
+    )
+
+
+def _normalize_model_name(model: str) -> str:
+    """Normalize friendly aliases to the upstream provider model name."""
+    return _EMBEDDING_MODEL_ALIASES.get(model.strip().lower(), model)
+
+
+def _is_embedding_model(model: str) -> bool:
+    """Return True when the request targets an embeddings-only model."""
+    normalized = _normalize_model_name(model).lower().strip()
+    return normalized.startswith("text-embedding-")
+
+
+def _extract_prompt_input(prompt: UnifiedPrompt) -> str:
+    """Use the latest user message as the input for embedding requests."""
+    for message in reversed(prompt.messages):
+        if message.role == "user" and message.content.strip():
+            return message.content
+    for message in reversed(prompt.messages):
+        if message.content.strip():
+            return message.content
+    return ""
 
 
 def _infer_provider_from_model(model: str) -> str:
@@ -105,6 +155,7 @@ def _parse_api_key(api_key: str) -> tuple[str, dict[str, str]]:
        -> returns (KEY, {"google": "dev", "anthropic": "dev-anthropic", ...})
 
     Format 3 is detected when the part after '::' contains '='.
+    Blank or null-like virtual key values are ignored.
     """
     if "::" not in api_key:
         return api_key, {}
@@ -115,9 +166,13 @@ def _parse_api_key(api_key: str) -> tuple[str, dict[str, str]]:
             pair = pair.strip()
             if "=" in pair:
                 provider_slug, vk_slug = pair.split("=", 1)
-                mapping[provider_slug.strip()] = vk_slug.strip()
+                normalized_slug = provider_slug.strip()
+                normalized_key = _sanitize_virtual_key(vk_slug)
+                if normalized_slug and normalized_key:
+                    mapping[normalized_slug] = normalized_key
         return portkey_key, mapping
-    return portkey_key, {"_default": vk_part}
+    default_key = _sanitize_virtual_key(vk_part)
+    return portkey_key, ({"_default": default_key} if default_key else {})
 
 
 class PortkeyAdapter(GatewayProvider):
@@ -141,7 +196,25 @@ class PortkeyAdapter(GatewayProvider):
     ) -> Union[UnifiedResponse, GatewayError]:
         try:
             portkey_key, virtual_keys = _parse_api_key(api_key)
-            llm_provider = _infer_provider_from_model(prompt.model)
+            normalized_model = _normalize_model_name(prompt.model)
+            is_embedding_request = _is_embedding_model(normalized_model)
+            llm_provider = _infer_provider_from_model(normalized_model)
+            selected_virtual_key = _get_virtual_key_for_provider(
+                virtual_keys, llm_provider
+            )
+
+            if llm_provider == "openrouter" and virtual_keys and selected_virtual_key is None:
+                return GatewayError(
+                    trace_id=prompt.trace_id,
+                    error_code=GatewayError.AUTH_FAILED,
+                    message=(
+                        "OpenRouter is not configured for this Portkey provider — "
+                        "add a valid OpenRouter virtual key slug in Configuration > Providers."
+                    ),
+                    status_code=400,
+                    provider_name="portkey",
+                )
+
             headers = self._build_headers(
                 portkey_key, llm_provider=llm_provider, virtual_keys=virtual_keys
             )
@@ -163,22 +236,29 @@ class PortkeyAdapter(GatewayProvider):
                 }
                 headers["x-portkey-config"] = json.dumps(guardrail_config)
                 headers["x-portkey-guardrails"] = json.dumps(list(prompt.guardrail_ids))
-            body: dict[str, Any] = {
-                "model": prompt.model,
-                "messages": [
-                    {"role": m.role, "content": m.content} for m in prompt.messages
-                ],
-            }
-            if prompt.temperature is not None:
-                body["temperature"] = prompt.temperature
-            if prompt.max_tokens is not None:
-                body["max_tokens"] = prompt.max_tokens
 
-            metadata: dict[str, Any] = {"trace_id": prompt.trace_id}
-            metadata.update(prompt.metadata)
-            body["metadata"] = metadata
+            if is_embedding_request:
+                body = {
+                    "model": normalized_model,
+                    "input": _extract_prompt_input(prompt),
+                }
+                url = f"{base_url.rstrip('/')}/embeddings"
+            else:
+                body = {
+                    "model": normalized_model,
+                    "messages": [
+                        {"role": m.role, "content": m.content} for m in prompt.messages
+                    ],
+                }
+                if prompt.temperature is not None:
+                    body["temperature"] = prompt.temperature
+                if prompt.max_tokens is not None:
+                    body["max_tokens"] = prompt.max_tokens
 
-            url = f"{base_url.rstrip('/')}/chat/completions"
+                metadata: dict[str, Any] = {"trace_id": prompt.trace_id}
+                metadata.update(prompt.metadata)
+                body["metadata"] = metadata
+                url = f"{base_url.rstrip('/')}/chat/completions"
             try:
                 resp = await self._execute_with_retry(
                     method="POST", url=url, headers=headers, json_body=body
@@ -248,17 +328,42 @@ class PortkeyAdapter(GatewayProvider):
                     trace_id=prompt.trace_id,
                 )
 
-            content = data["choices"][0]["message"]["content"]
-            model = data.get("model", prompt.model)
+            model = data.get("model", normalized_model)
 
             usage: UsageInfo | None = None
             if "usage" in data:
                 u = data["usage"]
                 usage = UsageInfo(
-                    prompt_tokens=u["prompt_tokens"],
-                    completion_tokens=u["completion_tokens"],
-                    total_tokens=u["total_tokens"],
+                    prompt_tokens=int(u.get("prompt_tokens", 0)),
+                    completion_tokens=int(u.get("completion_tokens", 0)),
+                    total_tokens=int(u.get("total_tokens", u.get("prompt_tokens", 0))),
                 )
+
+            if is_embedding_request:
+                embedding_rows = data.get("data", [])
+                first_row = (
+                    embedding_rows[0]
+                    if isinstance(embedding_rows, list) and embedding_rows
+                    else {}
+                )
+                embedding = (
+                    first_row.get("embedding", [])
+                    if isinstance(first_row, dict)
+                    else []
+                )
+                dimensions = len(embedding) if isinstance(embedding, list) else 0
+                preview = embedding[:8] if isinstance(embedding, list) else []
+                content = json.dumps(
+                    {
+                        "message": "Embedding generated successfully",
+                        "model": model,
+                        "dimensions": dimensions,
+                        "embedding_preview": preview,
+                    },
+                    indent=2,
+                )
+            else:
+                content = data["choices"][0]["message"]["content"]
 
             # Check for guardrail hook_results in successful responses
             # (Portkey may include them even on 200 when guardrails pass)
@@ -456,7 +561,7 @@ class PortkeyAdapter(GatewayProvider):
             "Content-Type": "application/json",
         }
         if virtual_keys:
-            vk = virtual_keys.get(llm_provider) or virtual_keys.get("_default")
+            vk = _get_virtual_key_for_provider(virtual_keys, llm_provider)
             if vk:
                 headers["x-portkey-virtual-key"] = vk
             else:
@@ -735,6 +840,18 @@ class PortkeyAdapter(GatewayProvider):
                     provider_name="portkey",
                 )
             if status in (400, 422):
+                normalized_detail = detail.strip().lower()
+                if "following keys are not valid" in normalized_detail and "null" in normalized_detail:
+                    return GatewayError(
+                        trace_id=_trace_id,
+                        error_code=GatewayError.AUTH_FAILED,
+                        message=(
+                            "OpenRouter is not configured for this Portkey provider — "
+                            "add a valid OpenRouter virtual key slug in Configuration > Providers."
+                        ),
+                        status_code=status,
+                        provider_name="portkey",
+                    )
                 return GatewayError(
                     trace_id=_trace_id,
                     error_code=GatewayError.VALIDATION_ERROR,

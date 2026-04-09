@@ -47,6 +47,7 @@ export default function ProvidersPage() {
         vk_google: "",
         vk_openai: "",
         vk_anthropic: "",
+        vk_openrouter: "dev-openrouter",
         provider_api_key: "",
         base_url: "",
     });
@@ -69,6 +70,11 @@ export default function ProvidersPage() {
         fetchProviders();
     }, []);
 
+    const normalizeVirtualKeyInput = (value: string): string => {
+        const trimmed = value.trim();
+        return ["null", "none", "undefined"].includes(trimmed.toLowerCase()) ? "" : trimmed;
+    };
+
     const openCreate = () => {
         setEditingProvider(null);
         setConnectionType("cloud");
@@ -78,6 +84,7 @@ export default function ProvidersPage() {
             vk_google: "",
             vk_openai: "",
             vk_anthropic: "",
+            vk_openrouter: "dev-openrouter",
             provider_api_key: "",
             base_url: "https://api.portkey.ai/v1",
         });
@@ -95,13 +102,14 @@ export default function ProvidersPage() {
             setConnectionType("cloud");
             const parts = (provider.api_key || "").split("::");
             const vkPart = parts[1] || "";
-            let vkGoogle = "", vkOpenai = "", vkAnthropic = "";
+            let vkGoogle = "", vkOpenai = "", vkAnthropic = "", vkOpenRouter = "";
             if (vkPart.includes("=")) {
                 for (const pair of vkPart.split(",")) {
                     const [k, v] = pair.split("=", 2);
-                    if (k?.trim() === "google") vkGoogle = v?.trim() || "";
-                    if (k?.trim() === "openai") vkOpenai = v?.trim() || "";
-                    if (k?.trim() === "anthropic") vkAnthropic = v?.trim() || "";
+                    if (k?.trim() === "google") vkGoogle = normalizeVirtualKeyInput(v || "");
+                    if (k?.trim() === "openai") vkOpenai = normalizeVirtualKeyInput(v || "");
+                    if (k?.trim() === "anthropic") vkAnthropic = normalizeVirtualKeyInput(v || "");
+                    if (k?.trim() === "openrouter") vkOpenRouter = normalizeVirtualKeyInput(v || "");
                 }
             }
             setFormData({
@@ -110,6 +118,7 @@ export default function ProvidersPage() {
                 vk_google: vkGoogle,
                 vk_openai: vkOpenai,
                 vk_anthropic: vkAnthropic,
+                vk_openrouter: vkOpenRouter,
                 provider_api_key: "",
                 base_url: provider.base_url,
             });
@@ -121,6 +130,7 @@ export default function ProvidersPage() {
                 vk_google: "",
                 vk_openai: "",
                 vk_anthropic: "",
+                vk_openrouter: "",
                 provider_api_key: "",
                 base_url: provider.base_url,
             });
@@ -135,31 +145,40 @@ export default function ProvidersPage() {
         try {
             let finalApiKey: string;
             let finalBaseUrl: string;
+            const existingApiKey = editingProvider?.api_key || "";
+            const existingPortkeyKey = existingApiKey.split("::", 1)[0] || "";
 
             if (connectionType === "cloud") {
                 // Cloud mode: combine portkey_api_key and virtual keys per LLM provider
-                if (!editingProvider && !formData.portkey_api_key) {
+                const portkeyApiKey = formData.portkey_api_key.trim() || existingPortkeyKey;
+                if (!portkeyApiKey) {
                     setError("Portkey API Key is required");
                     setSaving(false);
                     return;
                 }
-                finalApiKey = formData.portkey_api_key;
+                finalApiKey = portkeyApiKey;
                 const vkParts: string[] = [];
-                if (formData.vk_google.trim()) vkParts.push(`google=${formData.vk_google.trim()}`);
-                if (formData.vk_openai.trim()) vkParts.push(`openai=${formData.vk_openai.trim()}`);
-                if (formData.vk_anthropic.trim()) vkParts.push(`anthropic=${formData.vk_anthropic.trim()}`);
+                const googleVk = normalizeVirtualKeyInput(formData.vk_google);
+                const openaiVk = normalizeVirtualKeyInput(formData.vk_openai);
+                const anthropicVk = normalizeVirtualKeyInput(formData.vk_anthropic);
+                const openrouterVk = normalizeVirtualKeyInput(formData.vk_openrouter);
+                if (googleVk) vkParts.push(`google=${googleVk}`);
+                if (openaiVk) vkParts.push(`openai=${openaiVk}`);
+                if (anthropicVk) vkParts.push(`anthropic=${anthropicVk}`);
+                if (openrouterVk) vkParts.push(`openrouter=${openrouterVk}`);
                 if (vkParts.length > 0) {
-                    finalApiKey = `${formData.portkey_api_key}::${vkParts.join(",")}`;
+                    finalApiKey = `${portkeyApiKey}::${vkParts.join(",")}`;
                 }
                 finalBaseUrl = formData.base_url || "https://api.portkey.ai/v1";
             } else {
                 // Self-hosted mode: use provider API key directly
-                if (!editingProvider && !formData.provider_api_key) {
+                const providerApiKey = formData.provider_api_key.trim() || existingApiKey;
+                if (!providerApiKey) {
                     setError("Provider API Key is required");
                     setSaving(false);
                     return;
                 }
-                finalApiKey = formData.provider_api_key;
+                finalApiKey = providerApiKey;
                 finalBaseUrl = formData.base_url || "http://localhost:8787/v1";
             }
 
@@ -493,6 +512,15 @@ export default function ProvidersPage() {
                                                 value={formData.vk_anthropic}
                                                 onChange={(e) => setFormData({ ...formData, vk_anthropic: e.target.value })}
                                                 placeholder="e.g. dev-anthropic"
+                                                className="h-8 text-sm"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <label className="text-xs text-muted-foreground w-20 shrink-0">OpenRouter</label>
+                                            <Input
+                                                value={formData.vk_openrouter}
+                                                onChange={(e) => setFormData({ ...formData, vk_openrouter: e.target.value })}
+                                                placeholder="e.g. dev-openrouter"
                                                 className="h-8 text-sm"
                                             />
                                         </div>
