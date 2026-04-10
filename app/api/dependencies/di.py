@@ -172,22 +172,27 @@ def get_log_service(
 
 def get_chat_service(
     provider_repo: ProviderRepository = Depends(get_provider_repo),
+    policy_repo: PolicyRepository = Depends(get_policy_repo),
     log_service: LogService = Depends(get_log_service),
     adapter: GatewayProvider = Depends(get_adapter),
 ) -> ChatService:
-    """Create a ChatService with ProviderRepository, LogService, and GatewayProvider.
+    """Create a ChatService with ProviderRepository, PolicyRepository, LogService, and GatewayProvider.
 
     Spec §2.6: dependencies — ProviderRepository (from get_provider_repo),
-    LogService (from get_log_service), GatewayProvider (from get_adapter).
+    PolicyRepository (from get_policy_repo), LogService (from get_log_service),
+    GatewayProvider (from get_adapter).
     """
     if not isinstance(provider_repo, ProviderRepository):
         provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
+    if not isinstance(policy_repo, PolicyRepository):
+        policy_repo = PolicyRepository(session=None)  # type: ignore[arg-type]
     if not isinstance(log_service, LogService):
         log_service = get_log_service()
     if not isinstance(adapter, GatewayProvider):
         adapter = get_adapter()
     return ChatService(
         provider_repo=provider_repo,
+        policy_repo=policy_repo,
         log_service=log_service,
         adapter=adapter,
     )

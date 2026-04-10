@@ -64,6 +64,14 @@ def mock_log_service():
 
 
 @pytest.fixture
+def mock_policy_repo():
+    """Mock PolicyRepository with async methods."""
+    repo = AsyncMock()
+    repo.list_all = AsyncMock(return_value=[])
+    return repo
+
+
+@pytest.fixture
 def mock_adapter():
     """Мок GatewayProvider (адаптер) с async-методами."""
     adapter = AsyncMock()
@@ -81,10 +89,11 @@ def mock_adapter():
 
 
 @pytest.fixture
-def service(mock_provider_repo, mock_log_service, mock_adapter):
+def service(mock_provider_repo, mock_policy_repo, mock_log_service, mock_adapter):
     """Instance of ChatService with mocked dependencies."""
     return ChatService(
         provider_repo=mock_provider_repo,
+        policy_repo=mock_policy_repo,
         log_service=mock_log_service,
         adapter=mock_adapter,
     )
@@ -310,6 +319,64 @@ class TestSendChatMessageHappyPath:
         )
         prompt_arg = mock_adapter.send_prompt.call_args[0][0]
         assert prompt_arg.guardrail_ids == []
+
+    @pytest.mark.asyncio
+    async def test_active_cloud_guardrails_auto_apply_when_none_selected(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """Active cloud guardrails should be applied by default even when the UI sends none."""
+        active_cloud_policy = MagicMock(
+            id=11,
+            name="Cloud block",
+            remote_id="gr-cloud-001",
+            body={"deny": True},
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [active_cloud_policy]
+
+        await service.send_chat_message(
+            model=SAMPLE_MODEL,
+            messages=SAMPLE_MESSAGES,
+        )
+
+        prompt_arg = mock_adapter.send_prompt.call_args[0][0]
+        assert prompt_arg.guardrail_ids == ["gr-cloud-001"]
+
+    @pytest.mark.asyncio
+    async def test_active_local_guardrail_can_block_before_llm_call(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """Active local webhook/regex-style policies should block in the gateway before the LLM call."""
+        local_policy = MagicMock(
+            id=21,
+            name="Block blocked-word",
+            remote_id=None,
+            body={
+                "checks": [
+                    {
+                        "id": "default.regexMatch",
+                        "parameters": {
+                            "rule": "blocked-word",
+                            "not": True,
+                        },
+                    }
+                ],
+                "actions": {"onFail": "block", "onPass": "allow"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        result = await service.send_chat_message(
+            model=SAMPLE_MODEL,
+            messages=[{"role": "user", "content": "This contains blocked-word."}],
+        )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is True
+        assert "Block blocked-word" in result.content
+        mock_adapter.send_prompt.assert_not_awaited()
 
     @pytest.mark.asyncio
     async def test_prompt_temperature_none_by_default(self, service, mock_adapter):

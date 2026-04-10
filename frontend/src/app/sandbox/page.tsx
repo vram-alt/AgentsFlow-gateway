@@ -171,6 +171,9 @@ function ChatTab() {
                     (p) => p.is_active
                 );
                 setPolicies(active);
+                if (active.some((p) => !p.remote_id) && !active.some((p) => !!p.remote_id)) {
+                    setGuardrailMode("local");
+                }
             })
             .catch(() => setPolicies([]));
     }, []);
@@ -495,8 +498,8 @@ function ChatTab() {
 
                                     <p className="text-[10px] text-muted-foreground/70 leading-tight">
                                         {guardrailMode === "cloud"
-                                            ? "Cloud guardrails are enforced by Portkey — requests are validated before reaching the LLM."
-                                            : "Local policies are informational only — they are not enforced by Portkey Cloud."}
+                                            ? "Cloud guardrails are enforced by Portkey before the LLM call. If none are selected, all active cloud policies apply automatically."
+                                            : "Local policies are enforced by the gateway before the LLM call. If none are selected, all active local policies apply automatically."}
                                     </p>
 
                                     <Select
