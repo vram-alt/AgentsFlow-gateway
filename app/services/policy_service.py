@@ -73,7 +73,7 @@ def _validate_headers_object(headers: Any, field_name: str) -> str | None:
 
 
 def _validate_custom_guardrail_body(body: dict[str, Any]) -> str | None:
-    """Validate only the custom Webhook / Log checks without affecting other policies."""
+    """Validate custom guardrail check parameters without affecting other policies."""
     checks = body.get("checks")
     if checks is None:
         return None
@@ -125,6 +125,97 @@ def _validate_custom_guardrail_body(body: dict[str, Any]) -> str | None:
                 return (
                     f"checks[{index}].parameters.{timeout_key} must be a positive integer"
                 )
+
+        # ── Validate deterministic BASIC check parameters ────────
+        error = _validate_deterministic_check_params(index, check_id, parameters)
+        if error:
+            return error
+
+    return None
+
+
+def _validate_range_params(
+    index: int,
+    parameters: dict[str, Any],
+    min_key: str,
+    max_key: str,
+) -> str | None:
+    """Validate that min/max range parameters are non-negative integers."""
+    for key in (min_key, max_key):
+        value = parameters.get(key)
+        if value is not None:
+            if not isinstance(value, (int, float)) or value < 0:
+                return f"checks[{index}].parameters.{key} must be a non-negative number"
+    min_val = parameters.get(min_key)
+    max_val = parameters.get(max_key)
+    if min_val is not None and max_val is not None and min_val > max_val:
+        return f"checks[{index}].parameters.{min_key} must be <= {max_key}"
+    return None
+
+
+def _validate_deterministic_check_params(
+    index: int, check_id: str, parameters: dict[str, Any]
+) -> str | None:
+    """Validate parameters for deterministic Portkey BASIC checks."""
+    if "sentencecount" in check_id:
+        return _validate_range_params(index, parameters, "minSentences", "maxSentences")
+
+    if "wordcount" in check_id:
+        return _validate_range_params(index, parameters, "minWords", "maxWords")
+
+    if "charactercount" in check_id:
+        return _validate_range_params(index, parameters, "minCharacters", "maxCharacters")
+
+    if "endswith" in check_id:
+        suffix = parameters.get("Suffix") or parameters.get("suffix")
+        if suffix is not None and not isinstance(suffix, str):
+            return f"checks[{index}].parameters.Suffix must be a string"
+
+    if "jsonschema" in check_id:
+        schema = parameters.get("schema")
+        if schema is not None and not isinstance(schema, dict):
+            return f"checks[{index}].parameters.schema must be a JSON object"
+
+    if "jsonkeys" in check_id:
+        keys = parameters.get("keys")
+        if keys is not None and not isinstance(keys, list):
+            return f"checks[{index}].parameters.keys must be an array"
+        operator = parameters.get("operator")
+        if operator is not None and str(operator).lower() not in ("any", "all", "none"):
+            return f"checks[{index}].parameters.operator must be 'any', 'all', or 'none'"
+
+    if check_id in ("default.contains", "contains"):
+        words = parameters.get("words")
+        if words is not None and not isinstance(words, list):
+            return f"checks[{index}].parameters.words must be an array"
+        operator = parameters.get("operator")
+        if operator is not None and str(operator).lower() not in ("any", "all", "none"):
+            return f"checks[{index}].parameters.operator must be 'any', 'all', or 'none'"
+
+    if "modelwhitelist" in check_id:
+        models = parameters.get("Models") or parameters.get("models")
+        if models is not None and not isinstance(models, list):
+            return f"checks[{index}].parameters.Models must be an array"
+
+    if "modelrules" in check_id:
+        rules = parameters.get("rules")
+        if rules is not None and not isinstance(rules, dict):
+            return f"checks[{index}].parameters.rules must be a JSON object"
+
+    if "allowedrequesttypes" in check_id:
+        for key in ("allowedTypes", "blockedTypes"):
+            val = parameters.get(key)
+            if val is not None and not isinstance(val, list):
+                return f"checks[{index}].parameters.{key} must be an array"
+
+    if "requiredmetadatakeyvalue" in check_id:
+        pairs = parameters.get("metadataPairs")
+        if pairs is not None and not isinstance(pairs, dict):
+            return f"checks[{index}].parameters.metadataPairs must be a JSON object"
+    elif "requiredmetadatakey" in check_id:
+        keys = parameters.get("metadataKeys")
+        if keys is not None and not isinstance(keys, list):
+            return f"checks[{index}].parameters.metadataKeys must be an array"
 
     return None
 

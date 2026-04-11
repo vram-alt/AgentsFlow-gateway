@@ -16,6 +16,27 @@ from app.services.policy_service import PolicyService
 from app.domain.dto.gateway_error import GatewayError
 
 
+VALID_DETERMINISTIC_GUARDRAIL_BODIES = [
+    pytest.param({"checks": [{"id": "default.sentenceCount", "parameters": {"minSentences": 1, "maxSentences": 4}}]}, id="sentence-count"),
+    pytest.param({"checks": [{"id": "default.wordCount", "parameters": {"minWords": 1, "maxWords": 50}}]}, id="word-count"),
+    pytest.param({"checks": [{"id": "default.characterCount", "parameters": {"minCharacters": 1, "maxCharacters": 500}}]}, id="character-count"),
+    pytest.param({"checks": [{"id": "default.uppercaseCheck", "parameters": {"not": False}}]}, id="uppercase-check"),
+    pytest.param({"checks": [{"id": "default.lowercaseDetection", "parameters": {"format": "lowercase"}}]}, id="lowercase-check"),
+    pytest.param({"checks": [{"id": "default.endsWith", "parameters": {"Suffix": "."}}]}, id="ends-with"),
+    pytest.param({"checks": [{"id": "default.jsonSchema", "parameters": {"schema": {"type": "object", "required": ["key"], "properties": {"key": {"type": "string"}}}}}]}, id="json-schema"),
+    pytest.param({"checks": [{"id": "default.jsonKeys", "parameters": {"keys": ["key1", "key2"], "operator": "all"}}]}, id="json-keys"),
+    pytest.param({"checks": [{"id": "default.validUrls", "parameters": {"onlyDNS": False}}]}, id="valid-urls"),
+    pytest.param({"checks": [{"id": "default.containsCode", "parameters": {"format": "sql"}}]}, id="contains-code"),
+    pytest.param({"checks": [{"id": "default.notNull", "parameters": {"not": False}}]}, id="not-null"),
+    pytest.param({"checks": [{"id": "default.contains", "parameters": {"words": ["blocked-word"], "operator": "any"}}]}, id="contains"),
+    pytest.param({"checks": [{"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": False}}]}, id="model-whitelist"),
+    pytest.param({"checks": [{"id": "default.modelRules", "parameters": {"rules": {"tier": ["gpt-4o"]}, "not": False}}]}, id="model-rules"),
+    pytest.param({"checks": [{"id": "default.allowedRequestTypes", "parameters": {"allowedTypes": ["chat"], "blockedTypes": []}}]}, id="allowed-request-types"),
+    pytest.param({"checks": [{"id": "default.requiredMetadataKeys", "parameters": {"metadataKeys": ["user_id"], "operator": "all"}}]}, id="required-metadata-keys"),
+    pytest.param({"checks": [{"id": "default.requiredMetadataKeyValuePairs", "parameters": {"metadataPairs": {"environment": "production"}, "operator": "all"}}]}, id="required-metadata-kv"),
+]
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
 # ═══════════════════════════════════════════════════════════════════════════
@@ -123,9 +144,13 @@ class TestCreatePolicy:
 
         # Assert
         mock_provider_repo.get_active_by_name.assert_awaited_once_with("portkey")
-        mock_adapter.create_guardrail.assert_awaited_once_with(
-            body, fake_provider.api_key, fake_provider.base_url
-        )
+        mock_adapter.create_guardrail.assert_awaited_once()
+        create_args = mock_adapter.create_guardrail.await_args.args
+        assert create_args[1] == fake_provider.api_key
+        assert create_args[2] == fake_provider.base_url
+        assert create_args[0]["type"] == "content_filter"
+        assert create_args[0]["threshold"] == 0.9
+        assert create_args[0]["name"] == "test-policy"
         mock_policy_repo.create.assert_awaited_once()
         assert result is not None
         assert not isinstance(result, GatewayError)
@@ -163,21 +188,23 @@ class TestCreatePolicy:
         mock_policy_repo.create.assert_not_awaited()
 
     @pytest.mark.asyncio
-    async def test_create_policy_cloud_error_does_not_touch_db(
+    async def test_create_policy_cloud_error_falls_back_to_local_save(
         self, service, mock_provider_repo, mock_adapter, mock_policy_repo, fake_provider
     ):
-        """[SRE_MARKER] Ошибка облака → GatewayError, БД НЕ изменяется."""
+        """Cloud create failures should still allow a local-only policy save without a remote_id."""
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.create_guardrail.return_value = GatewayError(
             trace_id="123e4567-e89b-42d3-a456-426614174000",
             error_code="PROVIDER_ERROR",
             message="Cloud timeout",
         )
+        mock_policy_repo.create.return_value = MagicMock(id=5, name="p", remote_id=None)
 
         result = await service.create_policy(name="p", body={"a": 1})
 
-        assert isinstance(result, GatewayError)
-        mock_policy_repo.create.assert_not_awaited()
+        assert not isinstance(result, GatewayError)
+        mock_policy_repo.create.assert_awaited_once()
+        assert mock_policy_repo.create.await_args.kwargs["remote_id"] is None
 
     @pytest.mark.asyncio
     async def test_create_policy_passes_remote_id_to_repo(
@@ -194,6 +221,30 @@ class TestCreatePolicy:
         call_kwargs = mock_policy_repo.create.call_args
         # remote_id should be passed to the create call
         assert "cloud-id-xyz" in str(call_kwargs)
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("body", VALID_DETERMINISTIC_GUARDRAIL_BODIES)
+    async def test_create_policy_accepts_all_deterministic_guardrail_templates(
+        self, service, mock_provider_repo, mock_adapter, mock_policy_repo, fake_provider, body
+    ):
+        """All newly added deterministic Portkey BASIC checks should pass validation and be persisted."""
+        mock_provider_repo.get_active_by_name.return_value = fake_provider
+        mock_adapter.create_guardrail.return_value = {
+            "remote_id": "deterministic-guardrail",
+            "raw_response": {},
+        }
+        mock_policy_repo.create.return_value = MagicMock(id=99, name="deterministic-policy")
+
+        result = await service.create_policy(name="deterministic-policy", body=body)
+
+        assert not isinstance(result, GatewayError)
+        mock_adapter.create_guardrail.assert_awaited_once()
+        call_args = mock_adapter.create_guardrail.await_args.args
+        assert call_args[1] == fake_provider.api_key
+        assert call_args[2] == fake_provider.base_url
+        assert call_args[0]["checks"] == body["checks"]
+        assert call_args[0]["name"] == "deterministic-policy"
+        mock_policy_repo.create.assert_awaited_once()
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -391,16 +442,16 @@ class TestDeletePolicy:
         mock_policy_repo.get_by_id.return_value = fake_policy
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.delete_guardrail.return_value = MagicMock()
-        mock_policy_repo.soft_delete.return_value = True
+        mock_policy_repo.hard_delete.return_value = True
 
         result = await service.delete_policy(policy_id=42)
 
         mock_adapter.delete_guardrail.assert_awaited_once()
-        mock_policy_repo.soft_delete.assert_awaited_once_with(42)
+        mock_policy_repo.hard_delete.assert_awaited_once_with(42)
         assert result is True
 
     @pytest.mark.asyncio
-    async def test_delete_policy_cloud_error_does_not_touch_db(
+    async def test_delete_policy_cloud_error_still_removes_local_policy(
         self,
         service,
         mock_policy_repo,
@@ -409,7 +460,7 @@ class TestDeletePolicy:
         fake_policy,
         fake_provider,
     ):
-        """[SRE_MARKER] Ошибка облака при удалении → GatewayError, БД не трогаем."""
+        """Cloud delete failures should still remove the local policy so the UI stays in sync with user intent."""
         mock_policy_repo.get_by_id.return_value = fake_policy
         mock_provider_repo.get_active_by_name.return_value = fake_provider
         mock_adapter.delete_guardrail.return_value = GatewayError(
@@ -417,11 +468,12 @@ class TestDeletePolicy:
             error_code="PROVIDER_ERROR",
             message="Delete failed",
         )
+        mock_policy_repo.hard_delete.return_value = True
 
         result = await service.delete_policy(policy_id=42)
 
-        assert isinstance(result, GatewayError)
-        mock_policy_repo.soft_delete.assert_not_awaited()
+        assert result is True
+        mock_policy_repo.hard_delete.assert_awaited_once_with(42)
 
     @pytest.mark.asyncio
     async def test_delete_policy_without_remote_id_skips_cloud(
@@ -430,12 +482,12 @@ class TestDeletePolicy:
         """Удаление без remote_id → облако НЕ вызывается, только soft_delete."""
         fake_policy.remote_id = None
         mock_policy_repo.get_by_id.return_value = fake_policy
-        mock_policy_repo.soft_delete.return_value = True
+        mock_policy_repo.hard_delete.return_value = True
 
         result = await service.delete_policy(policy_id=42)
 
         mock_adapter.delete_guardrail.assert_not_awaited()
-        mock_policy_repo.soft_delete.assert_awaited_once_with(42)
+        mock_policy_repo.hard_delete.assert_awaited_once_with(42)
         assert result is True
 
     @pytest.mark.asyncio
@@ -445,10 +497,11 @@ class TestDeletePolicy:
         """Успешное удаление возвращает True."""
         fake_policy.remote_id = None
         mock_policy_repo.get_by_id.return_value = fake_policy
-        mock_policy_repo.soft_delete.return_value = True
+        mock_policy_repo.hard_delete.return_value = True
 
         result = await service.delete_policy(policy_id=42)
 
+        mock_policy_repo.hard_delete.assert_awaited_once_with(42)
         assert result is True
 
 

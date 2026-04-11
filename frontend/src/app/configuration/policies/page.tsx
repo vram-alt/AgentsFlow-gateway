@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -61,7 +61,13 @@ const POLICY_PRESET_PATTERNS = {
     custom: "(blocked-word|secret-token)",
 } as const;
 
-type PolicyTemplateKind = "manual" | "regex-pii" | "regex-sql" | "regex-custom" | "webhook-validate" | "log-only" | "validate-and-log";
+type PolicyTemplateKind = "manual" | "regex-pii" | "regex-sql" | "regex-custom" | "webhook-validate" | "log-only" | "validate-and-log"
+    | "sentence-count" | "word-count" | "character-count"
+    | "uppercase-check" | "lowercase-check" | "ends-with"
+    | "json-schema" | "json-keys" | "valid-urls"
+    | "contains-code" | "not-null" | "contains"
+    | "model-whitelist" | "model-rules" | "allowed-request-types"
+    | "required-metadata-keys" | "required-metadata-kv";
 type PolicyTemplateMode = "contains" | "regex";
 type PolicyTemplateTarget = "request" | "response" | "both";
 
@@ -96,7 +102,58 @@ const TEMPLATE_DEFAULT_NAMES: Record<Exclude<PolicyTemplateKind, "manual">, stri
     "webhook-validate": "Custom Webhook Validation",
     "log-only": "Custom Output Logging",
     "validate-and-log": "Validate and Log",
+    "sentence-count": "Sentence Count",
+    "word-count": "Word Count",
+    "character-count": "Character Count",
+    "uppercase-check": "Uppercase Check",
+    "lowercase-check": "Lowercase Detection",
+    "ends-with": "Ends With",
+    "json-schema": "JSON Schema",
+    "json-keys": "JSON Keys",
+    "valid-urls": "Valid URLs",
+    "contains-code": "Contains Code",
+    "not-null": "Not Null",
+    "contains": "Contains",
+    "model-whitelist": "Model Whitelist",
+    "model-rules": "Model Rules",
+    "allowed-request-types": "Allowed Request Types",
+    "required-metadata-keys": "Required Metadata Keys",
+    "required-metadata-kv": "Required Metadata Key-Value Pairs",
 };
+
+type TemplateCategory = "popular" | "content" | "structured" | "request";
+
+const TEMPLATE_CATEGORY_OPTIONS: Array<{
+    key: TemplateCategory;
+    label: string;
+    description: string;
+    kinds: Exclude<PolicyTemplateKind, "manual">[];
+}> = [
+    {
+        key: "popular",
+        label: "Popular",
+        description: "Fast starters for the most common policies",
+        kinds: ["regex-pii", "regex-sql", "regex-custom", "webhook-validate", "validate-and-log", "log-only"],
+    },
+    {
+        key: "content",
+        label: "Content",
+        description: "Text and format checks for prompts and responses",
+        kinds: ["sentence-count", "word-count", "character-count", "uppercase-check", "lowercase-check", "contains", "ends-with", "contains-code"],
+    },
+    {
+        key: "structured",
+        label: "Structured",
+        description: "JSON, null, and URL validation helpers",
+        kinds: ["json-schema", "json-keys", "valid-urls", "not-null"],
+    },
+    {
+        key: "request",
+        label: "Request",
+        description: "Model, request type, and metadata rules",
+        kinds: ["model-whitelist", "model-rules", "allowed-request-types", "required-metadata-keys", "required-metadata-kv"],
+    },
+];
 
 function buildPolicyTemplate(
     kind: Exclude<PolicyTemplateKind, "manual">,
@@ -136,6 +193,127 @@ function buildPolicyTemplate(
             null,
             2,
         );
+    }
+
+    // ── Deterministic BASIC check templates ──────────────────────
+    if (kind === "sentence-count") {
+        return JSON.stringify({
+            checks: [{ id: "default.sentenceCount", parameters: { minSentences: 1, maxSentences: 10 } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "word-count") {
+        return JSON.stringify({
+            checks: [{ id: "default.wordCount", parameters: { minWords: 1, maxWords: 500 } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "character-count") {
+        return JSON.stringify({
+            checks: [{ id: "default.characterCount", parameters: { minCharacters: 1, maxCharacters: 5000 } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "uppercase-check") {
+        return JSON.stringify({
+            checks: [{ id: "default.uppercaseCheck", parameters: { not: config.invertMatch } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "lowercase-check") {
+        return JSON.stringify({
+            checks: [{ id: "default.lowercaseDetection", parameters: { format: "lowercase" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "ends-with") {
+        return JSON.stringify({
+            checks: [{ id: "default.endsWith", parameters: { Suffix: config.pattern || "." } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "json-schema") {
+        return JSON.stringify({
+            checks: [{ id: "default.jsonSchema", parameters: { schema: { type: "object", required: ["key"], properties: { key: { type: "string" } } } } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "json-keys") {
+        return JSON.stringify({
+            checks: [{ id: "default.jsonKeys", parameters: { keys: ["key1", "key2"], operator: "all" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "valid-urls") {
+        return JSON.stringify({
+            checks: [{ id: "default.validUrls", parameters: { onlyDNS: false } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "contains-code") {
+        return JSON.stringify({
+            checks: [{ id: "default.containsCode", parameters: { format: config.pattern || "sql" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "not-null") {
+        return JSON.stringify({
+            checks: [{ id: "default.notNull", parameters: { not: false } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "contains") {
+        return JSON.stringify({
+            checks: [{ id: "default.contains", parameters: { words: (config.terms || "blocked-word, secret-token").split(",").map((w: string) => w.trim()), operator: "any" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "model-whitelist") {
+        return JSON.stringify({
+            checks: [{ id: "default.modelWhitelist", parameters: { Models: ["gemini-2.5-flash", "gpt-4o"], Inverse: false } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "model-rules") {
+        return JSON.stringify({
+            checks: [{ id: "default.modelRules", parameters: { rules: { tier: ["gemini-2.5-flash", "gpt-4o-mini"] }, not: false } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "allowed-request-types") {
+        return JSON.stringify({
+            checks: [{ id: "default.allowedRequestTypes", parameters: { allowedTypes: ["chat", "completions"], blockedTypes: [] } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "required-metadata-keys") {
+        return JSON.stringify({
+            checks: [{ id: "default.requiredMetadataKeys", parameters: { metadataKeys: ["user_id", "session_id"], operator: "all" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
+    }
+    if (kind === "required-metadata-kv") {
+        return JSON.stringify({
+            checks: [{ id: "default.requiredMetadataKeyValuePairs", parameters: { metadataPairs: { environment: "production" }, operator: "all" } }],
+            actions: { onFail: config.deny ? "block" : "allow", onPass: "allow" },
+            deny: config.deny,
+        }, null, 2);
     }
 
     const validateParams = new URLSearchParams({
@@ -283,6 +461,7 @@ export default function PoliciesPage() {
     const [deleteLoading, setDeleteLoading] = useState(false);
     const [selectedPolicy, setSelectedPolicy] = useState<Policy | null>(null);
     const [templateKind, setTemplateKind] = useState<PolicyTemplateKind>("manual");
+    const [templateCategory, setTemplateCategory] = useState<TemplateCategory>("popular");
     const [templateConfig, setTemplateConfig] = useState<PolicyTemplateConfig>(DEFAULT_TEMPLATE_CONFIG);
 
     // Persist the Local/Cloud tab choice in localStorage so it survives navigation
@@ -301,7 +480,7 @@ export default function PoliciesPage() {
         }
     };
 
-    const fetchPolicies = async () => {
+    const fetchPolicies = useCallback(async () => {
         setLoading(true);
         setPageError(null);
         try {
@@ -327,7 +506,7 @@ export default function PoliciesPage() {
         } finally {
             setLoading(false);
         }
-    };
+    }, []);
 
     const handleRefresh = () => {
         fetchPolicies();
@@ -335,11 +514,12 @@ export default function PoliciesPage() {
 
     useEffect(() => {
         fetchPolicies();
-    }, []);
+    }, [fetchPolicies]);
 
     const openCreate = () => {
         setEditingPolicy(null);
         setTemplateKind("manual");
+        setTemplateCategory("popular");
         setTemplateConfig(DEFAULT_TEMPLATE_CONFIG);
         setFormData({ name: "", body: '{\n  "checks": [\n    {\n      "id": "default.regexMatch",\n      "parameters": {\n        "rule": "block-word",\n        "pattern": "badword"\n      }\n    }\n  ],\n  "actions": {\n    "onFail": "block",\n    "onPass": "allow"\n  }\n}', provider_name: getPrimaryProviderName(providers) });
         setError(null);
@@ -355,7 +535,13 @@ export default function PoliciesPage() {
                     ? { ...templateConfig, pattern: POLICY_PRESET_PATTERNS.custom, invertMatch: false, deny: true, async: false, target: "request" }
                     : kind === "log-only"
                         ? { ...templateConfig, target: "response", deny: false, async: true }
-                        : { ...templateConfig, deny: true, async: false };
+                        : kind === "contains"
+                            ? { ...templateConfig, terms: "blocked-word, secret-token", deny: true, async: false, target: "request" }
+                            : kind === "ends-with"
+                                ? { ...templateConfig, pattern: ".", deny: true, async: false, target: "request" }
+                                : kind === "contains-code"
+                                    ? { ...templateConfig, pattern: "sql", deny: true, async: false, target: "request" }
+                                    : { ...templateConfig, deny: true, async: false };
 
         setTemplateKind(kind);
         setTemplateConfig(nextConfig);
@@ -381,6 +567,7 @@ export default function PoliciesPage() {
 
     const openEdit = (policy: Policy) => {
         setTemplateKind("manual");
+        setTemplateCategory("popular");
         setTemplateConfig(DEFAULT_TEMPLATE_CONFIG);
         setEditingPolicy(policy);
         setFormData({
@@ -466,6 +653,9 @@ export default function PoliciesPage() {
     const displayedPolicies = isCloudMode
         ? policies.filter((p) => !!p.remote_id)
         : policies.filter((p) => !p.remote_id);
+
+    const activeTemplateCategory = TEMPLATE_CATEGORY_OPTIONS.find((category) => category.key === templateCategory)
+        ?? TEMPLATE_CATEGORY_OPTIONS[0];
 
     const handleSync = async () => {
         setSyncLoading(true);
@@ -692,8 +882,8 @@ export default function PoliciesPage() {
 
             {/* Create/Edit Dialog */}
             <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-                <DialogContent className="max-w-4xl w-[95vw] max-h-[90vh] overflow-y-auto">
-                    <DialogHeader>
+                <DialogContent className="flex max-h-[88vh] w-[96vw] max-w-5xl flex-col overflow-hidden">
+                    <DialogHeader className="shrink-0 border-b pb-3">
                         <DialogTitle>
                             {editingPolicy ? "Edit Policy" : "Create Policy"}
                         </DialogTitle>
@@ -705,211 +895,264 @@ export default function PoliciesPage() {
                         <p className="text-xs text-muted-foreground">
                             <strong>Selected builder:</strong>{" "}
                             {templateKind === "manual"
-                                ? "Manual JSON"
+                                ? "Editable JSON"
                                 : TEMPLATE_DEFAULT_NAMES[templateKind]}
                         </p>
                     </DialogHeader>
-                    <div className="space-y-4 py-4">
+                    <div className="flex-1 min-h-0 overflow-hidden py-3">
                         {error && (
                             <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4" />
                                 {error}
                             </div>
                         )}
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Name</label>
-                            <Input
-                                value={formData.name}
-                                onChange={(e) => setFormData({ ...formData, name: e.target.value })}
-                                placeholder="e.g. content-filter"
-                            />
-                        </div>
-                        {!editingPolicy && (
+                        <div className={`grid gap-3 ${editingPolicy ? "md:grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_220px]"}`}>
                             <div className="space-y-2">
-                                <label className="text-sm font-medium">Provider</label>
-                                <Select
-                                    value={formData.provider_name}
-                                    onChange={(e) =>
-                                        setFormData({ ...formData, provider_name: e.target.value })
-                                    }
-                                >
-                                    <option value={getPrimaryProviderName(providers)}>
-                                        Portkey
-                                    </option>
-                                </Select>
+                                <label className="text-sm font-medium">Name</label>
+                                <Input
+                                    value={formData.name}
+                                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                                    placeholder="e.g. content-filter"
+                                />
                             </div>
-                        )}
-                        <div className="space-y-2">
-                            <label className="text-sm font-medium">Policy Body (JSON)</label>
-                            <div className="flex flex-wrap gap-2">
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "regex-pii" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("regex-pii")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Block PII Leaks
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "regex-sql" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("regex-sql")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Block SQL Injection
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "regex-custom" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("regex-custom")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Custom Regex
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "webhook-validate" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("webhook-validate")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Webhook Validate
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "log-only" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("log-only")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Output Log
-                                </Button>
-                                <Button
-                                    type="button"
-                                    variant={templateKind === "validate-and-log" ? "default" : "outline"}
-                                    size="sm"
-                                    onClick={() => applyTemplate("validate-and-log")}
-                                >
-                                    <PlusIcon className="w-3.5 h-3.5 mr-1" />
-                                    Validate + Log
-                                </Button>
-                            </div>
-                            {templateKind !== "manual" && (
-                                <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/30 p-3">
-                                    {(templateKind === "regex-pii" || templateKind === "regex-sql" || templateKind === "regex-custom") ? (
-                                        <div className="space-y-3">
-                                            <div className="space-y-1">
-                                                <label className="text-xs font-medium">Regex rule</label>
-                                                <Input
-                                                    value={templateConfig.pattern}
-                                                    onChange={(e) => patchTemplateConfig({ pattern: e.target.value })}
-                                                    placeholder="(DROP TABLE|DELETE FROM|INSERT INTO|UNION SELECT)"
-                                                />
-                                            </div>
-                                            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={templateConfig.invertMatch}
-                                                        onChange={(e) => patchTemplateConfig({ invertMatch: e.target.checked })}
-                                                        disabled={templateKind === "regex-pii"}
-                                                    />
-                                                    Use <code className="bg-secondary px-1 rounded">not: true</code>
-                                                </label>
-                                            </div>
-                                            <p className="text-[11px] text-muted-foreground">
-                                                Good for quick policies like <strong>Block PII Leaks</strong> and <strong>Block SQL Injection</strong>. The builder keeps the same JSON structure as your existing saved policies.
-                                            </p>
-                                        </div>
-                                    ) : (
-                                        <>
-                                            {templateKind !== "log-only" && (
-                                                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                    <div className="space-y-1">
-                                                        <label className="text-xs font-medium">Validation mode</label>
-                                                        <Select value={templateConfig.mode} onChange={(e) => patchTemplateConfig({ mode: e.target.value as PolicyTemplateMode })}>
-                                                            <option value="contains">Contains blocked words</option>
-                                                            <option value="regex">Regex pattern</option>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="space-y-1">
-                                                        <label className="text-xs font-medium">Check target</label>
-                                                        <Select value={templateConfig.target} onChange={(e) => patchTemplateConfig({ target: e.target.value as PolicyTemplateTarget })}>
-                                                            <option value="request">User request</option>
-                                                            <option value="response">Model response</option>
-                                                            <option value="both">Request + response</option>
-                                                        </Select>
-                                                    </div>
-                                                    <div className="space-y-1 sm:col-span-2">
-                                                        <label className="text-xs font-medium">{templateConfig.mode === "regex" ? "Regex pattern" : "Blocked words (comma separated)"}</label>
-                                                        <Input
-                                                            value={templateConfig.mode === "regex" ? templateConfig.pattern : templateConfig.terms}
-                                                            onChange={(e) => patchTemplateConfig(
-                                                                templateConfig.mode === "regex"
-                                                                    ? { pattern: e.target.value }
-                                                                    : { terms: e.target.value }
-                                                            )}
-                                                            placeholder={templateConfig.mode === "regex" ? "(blocked-word|secret-token)" : "blocked-word, secret-token"}
-                                                        />
-                                                    </div>
-                                                </div>
-                                            )}
-                                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                                                <div className="space-y-1">
-                                                    <label className="text-xs font-medium">Webhook timeout (ms)</label>
-                                                    <Input
-                                                        value={templateConfig.timeoutMs}
-                                                        onChange={(e) => patchTemplateConfig({ timeoutMs: e.target.value })}
-                                                        placeholder="3000"
-                                                    />
-                                                </div>
-                                                {templateKind !== "webhook-validate" && (
-                                                    <div className="space-y-1">
-                                                        <label className="text-xs font-medium">Log label</label>
-                                                        <Input
-                                                            value={templateConfig.logLabel}
-                                                            onChange={(e) => patchTemplateConfig({ logLabel: e.target.value })}
-                                                            placeholder="policy-audit"
-                                                        />
-                                                    </div>
-                                                )}
-                                            </div>
-                                            <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
-                                                {templateKind !== "log-only" && (
-                                                    <label className="flex items-center gap-2">
-                                                        <input
-                                                            type="checkbox"
-                                                            checked={templateConfig.deny}
-                                                            onChange={(e) => patchTemplateConfig({ deny: e.target.checked })}
-                                                        />
-                                                        Block on fail
-                                                    </label>
-                                                )}
-                                                <label className="flex items-center gap-2">
-                                                    <input
-                                                        type="checkbox"
-                                                        checked={templateConfig.async}
-                                                        onChange={(e) => patchTemplateConfig({ async: e.target.checked })}
-                                                    />
-                                                    Run async / observe-only
-                                                </label>
-                                            </div>
-                                        </>
-                                    )}
+                            {!editingPolicy && (
+                                <div className="space-y-2">
+                                    <label className="text-sm font-medium">Provider</label>
+                                    <Select
+                                        value={formData.provider_name}
+                                        onChange={(e) =>
+                                            setFormData({ ...formData, provider_name: e.target.value })
+                                        }
+                                    >
+                                        <option value={getPrimaryProviderName(providers)}>
+                                            Portkey
+                                        </option>
+                                    </Select>
                                 </div>
                             )}
-                            <Textarea
-                                value={formData.body}
-                                onChange={(e) => setFormData({ ...formData, body: e.target.value })}
-                                className="font-mono text-xs h-48"
-                                placeholder='{"checks": [...], "actions": [{"type": "block", "message": "Blocked"}]}'
-                            />
+                        </div>
+                        <div className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                                <label className="text-sm font-medium">Policy Body (JSON)</label>
+                                <Badge variant="outline" className="text-[11px]">
+                                    {templateKind === "manual" ? "Manual JSON" : TEMPLATE_DEFAULT_NAMES[templateKind]}
+                                </Badge>
+                            </div>
+                            <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
+                                <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/20 p-3 xl:max-h-[58vh] xl:overflow-hidden">
+                                    <div className="space-y-1">
+                                        <p className="text-sm font-medium">Starter templates</p>
+                                        <p className="text-[11px] text-muted-foreground">
+                                            Pick a category, choose a starter, then fine-tune the JSON on the right.
+                                        </p>
+                                    </div>
+                                    <div className="flex flex-wrap gap-1.5">
+                                        {TEMPLATE_CATEGORY_OPTIONS.map((category) => (
+                                            <button
+                                                key={category.key}
+                                                type="button"
+                                                onClick={() => setTemplateCategory(category.key)}
+                                                className={`rounded-full border px-2.5 py-1 text-[11px] font-medium transition-colors cursor-pointer ${templateCategory === category.key
+                                                    ? "border-primary bg-primary text-primary-foreground"
+                                                    : "border-border bg-background text-muted-foreground hover:text-foreground"
+                                                    }`}
+                                            >
+                                                {category.label}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div className="rounded-lg border border-border/50 bg-background/80 p-2.5">
+                                        <p className="text-[11px] font-medium text-foreground">
+                                            {activeTemplateCategory.label} templates
+                                        </p>
+                                        <p className="mb-3 mt-1 text-[11px] text-muted-foreground">
+                                            {activeTemplateCategory.description}
+                                        </p>
+                                        <div className="grid gap-2 sm:grid-cols-2 xl:max-h-64 xl:grid-cols-1 xl:overflow-y-auto xl:pr-1">
+                                            {activeTemplateCategory.kinds.map((kind) => (
+                                                <Button
+                                                    key={kind}
+                                                    type="button"
+                                                    variant={templateKind === kind ? "default" : "outline"}
+                                                    size="sm"
+                                                    className="h-auto justify-start px-3 py-2 text-left whitespace-normal leading-snug"
+                                                    onClick={() => applyTemplate(kind)}
+                                                >
+                                                    <PlusIcon className="mr-1.5 h-3.5 w-3.5 shrink-0" />
+                                                    <span>{TEMPLATE_DEFAULT_NAMES[kind]}</span>
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="min-w-0 space-y-3 xl:min-h-0">
+                                    {templateKind !== "manual" && (
+                                        <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/30 p-3">
+                                            {(templateKind === "regex-pii" || templateKind === "regex-sql" || templateKind === "regex-custom") ? (
+                                                <div className="space-y-3">
+                                                    <div className="space-y-1">
+                                                        <label className="text-xs font-medium">Regex rule</label>
+                                                        <Input
+                                                            value={templateConfig.pattern}
+                                                            onChange={(e) => patchTemplateConfig({ pattern: e.target.value })}
+                                                            placeholder="(DROP TABLE|DELETE FROM|INSERT INTO|UNION SELECT)"
+                                                        />
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                                                        <label className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={templateConfig.invertMatch}
+                                                                onChange={(e) => patchTemplateConfig({ invertMatch: e.target.checked })}
+                                                                disabled={templateKind === "regex-pii"}
+                                                            />
+                                                            Use <code className="bg-secondary px-1 rounded">not: true</code>
+                                                        </label>
+                                                    </div>
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        Good for quick policies like <strong>Block PII Leaks</strong> and <strong>Block SQL Injection</strong>. The builder keeps the same JSON structure as your existing saved policies.
+                                                    </p>
+                                                </div>
+                                            ) : (templateKind === "sentence-count" || templateKind === "word-count" || templateKind === "character-count"
+                                                || templateKind === "uppercase-check" || templateKind === "lowercase-check" || templateKind === "ends-with"
+                                                || templateKind === "json-schema" || templateKind === "json-keys" || templateKind === "valid-urls"
+                                                || templateKind === "contains-code" || templateKind === "not-null" || templateKind === "contains"
+                                                || templateKind === "model-whitelist" || templateKind === "model-rules" || templateKind === "allowed-request-types"
+                                                || templateKind === "required-metadata-keys" || templateKind === "required-metadata-kv") ? (
+                                                <div className="space-y-3">
+                                                    <p className="text-[11px] text-muted-foreground">
+                                                        <strong>{TEMPLATE_DEFAULT_NAMES[templateKind]}</strong> — Portkey BASIC deterministic guardrail. Edit the JSON below to customize parameters. The policy will be enforced locally when used in Local mode, or on Portkey Cloud in Cloud mode.
+                                                    </p>
+                                                    {(templateKind === "contains" || templateKind === "ends-with" || templateKind === "contains-code") && (
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">
+                                                                {templateKind === "contains" ? "Words (comma separated)" : templateKind === "contains-code" ? "Code format" : "Suffix"}
+                                                            </label>
+                                                            <Input
+                                                                value={templateKind === "contains" ? templateConfig.terms : templateConfig.pattern}
+                                                                onChange={(e) => patchTemplateConfig(
+                                                                    templateKind === "contains"
+                                                                        ? { terms: e.target.value }
+                                                                        : { pattern: e.target.value }
+                                                                )}
+                                                                placeholder={templateKind === "contains" ? "blocked-word, secret-token" : templateKind === "contains-code" ? "sql, python, typescript, javascript" : "."}
+                                                            />
+                                                        </div>
+                                                    )}
+                                                    {(templateKind === "uppercase-check") && (
+                                                        <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                                                            <label className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={templateConfig.invertMatch}
+                                                                    onChange={(e) => patchTemplateConfig({ invertMatch: e.target.checked })}
+                                                                />
+                                                                Use <code className="bg-secondary px-1 rounded">not: true</code> (invert check)
+                                                            </label>
+                                                        </div>
+                                                    )}
+                                                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                                                        <label className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={templateConfig.deny}
+                                                                onChange={(e) => patchTemplateConfig({ deny: e.target.checked })}
+                                                            />
+                                                            Block on fail
+                                                        </label>
+                                                    </div>
+                                                </div>
+                                            ) : (
+                                                <>
+                                                    {templateKind !== "log-only" && (
+                                                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                            <div className="space-y-1">
+                                                                <label className="text-xs font-medium">Validation mode</label>
+                                                                <Select value={templateConfig.mode} onChange={(e) => patchTemplateConfig({ mode: e.target.value as PolicyTemplateMode })}>
+                                                                    <option value="contains">Contains blocked words</option>
+                                                                    <option value="regex">Regex pattern</option>
+                                                                </Select>
+                                                            </div>
+                                                            <div className="space-y-1">
+                                                                <label className="text-xs font-medium">Check target</label>
+                                                                <Select value={templateConfig.target} onChange={(e) => patchTemplateConfig({ target: e.target.value as PolicyTemplateTarget })}>
+                                                                    <option value="request">User request</option>
+                                                                    <option value="response">Model response</option>
+                                                                    <option value="both">Request + response</option>
+                                                                </Select>
+                                                            </div>
+                                                            <div className="space-y-1 sm:col-span-2">
+                                                                <label className="text-xs font-medium">{templateConfig.mode === "regex" ? "Regex pattern" : "Blocked words (comma separated)"}</label>
+                                                                <Input
+                                                                    value={templateConfig.mode === "regex" ? templateConfig.pattern : templateConfig.terms}
+                                                                    onChange={(e) => patchTemplateConfig(
+                                                                        templateConfig.mode === "regex"
+                                                                            ? { pattern: e.target.value }
+                                                                            : { terms: e.target.value }
+                                                                    )}
+                                                                    placeholder={templateConfig.mode === "regex" ? "(blocked-word|secret-token)" : "blocked-word, secret-token"}
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Webhook timeout (ms)</label>
+                                                            <Input
+                                                                value={templateConfig.timeoutMs}
+                                                                onChange={(e) => patchTemplateConfig({ timeoutMs: e.target.value })}
+                                                                placeholder="3000"
+                                                            />
+                                                        </div>
+                                                        {templateKind !== "webhook-validate" && (
+                                                            <div className="space-y-1">
+                                                                <label className="text-xs font-medium">Log label</label>
+                                                                <Input
+                                                                    value={templateConfig.logLabel}
+                                                                    onChange={(e) => patchTemplateConfig({ logLabel: e.target.value })}
+                                                                    placeholder="policy-audit"
+                                                                />
+                                                            </div>
+                                                        )}
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                                                        {templateKind !== "log-only" && (
+                                                            <label className="flex items-center gap-2">
+                                                                <input
+                                                                    type="checkbox"
+                                                                    checked={templateConfig.deny}
+                                                                    onChange={(e) => patchTemplateConfig({ deny: e.target.checked })}
+                                                                />
+                                                                Block on fail
+                                                            </label>
+                                                        )}
+                                                        <label className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={templateConfig.async}
+                                                                onChange={(e) => patchTemplateConfig({ async: e.target.checked })}
+                                                            />
+                                                            Run async / observe-only
+                                                        </label>
+                                                    </div>
+                                                </>
+                                            )}
+                                        </div>
+                                    )}
+                                    <Textarea
+                                        value={formData.body}
+                                        onChange={(e) => setFormData({ ...formData, body: e.target.value })}
+                                        className="h-[48vh] min-h-96 resize-none rounded-xl border-border/70 bg-background/80 font-mono text-xs leading-5 shadow-inner"
+                                        placeholder='{"checks": [...], "actions": [{"type": "block", "message": "Blocked"}]}'
+                                    />
+                                    <p className="text-[11px] text-muted-foreground">
+                                        The JSON stays fully editable — template selections only prefill the structure for you.
+                                    </p>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                    <DialogFooter>
+                    <DialogFooter className="shrink-0 border-t pt-4">
                         <Button variant="outline" onClick={() => setDialogOpen(false)}>
                             Cancel
                         </Button>
@@ -1036,7 +1279,7 @@ export default function PoliciesPage() {
                             </div>
                             <div>
                                 <label className="text-xs text-muted-foreground uppercase tracking-wider">Policy Body (JSON)</label>
-                                <pre className="mt-2 p-5 rounded-lg bg-secondary text-xs font-mono overflow-auto max-h-[50vh] leading-relaxed whitespace-pre-wrap break-words">
+                                <pre className="mt-2 max-h-[50vh] overflow-auto rounded-lg bg-secondary p-5 font-mono text-xs leading-relaxed whitespace-pre-wrap wrap-break-word">
                                     {JSON.stringify(selectedPolicy.body, null, 2)}
                                 </pre>
                             </div>

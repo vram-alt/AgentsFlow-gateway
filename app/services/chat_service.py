@@ -12,6 +12,7 @@ import re
 import uuid
 from collections.abc import Sequence
 from typing import Any
+from urllib.parse import urlparse
 
 import httpx
 
@@ -396,6 +397,42 @@ class ChatService:
         if normalized_id == "log" or normalized_id.endswith(".log"):
             return await self._evaluate_log_check(check_id, parameters, request_payload)
 
+        # ── Deterministic BASIC checks (Portkey-compatible) ──────────
+        if "sentencecount" in normalized_id:
+            return self._evaluate_sentence_count_check(check_id, parameters, request_payload)
+        if "wordcount" in normalized_id:
+            return self._evaluate_word_count_check(check_id, parameters, request_payload)
+        if "charactercount" in normalized_id:
+            return self._evaluate_character_count_check(check_id, parameters, request_payload)
+        if "uppercase" in normalized_id:
+            return self._evaluate_uppercase_check(check_id, parameters, request_payload)
+        if "lowercase" in normalized_id:
+            return self._evaluate_lowercase_check(check_id, parameters, request_payload)
+        if "endswith" in normalized_id:
+            return self._evaluate_ends_with_check(check_id, parameters, request_payload)
+        if "jsonschema" in normalized_id:
+            return self._evaluate_json_schema_check(check_id, parameters, request_payload)
+        if "jsonkeys" in normalized_id:
+            return self._evaluate_json_keys_check(check_id, parameters, request_payload)
+        if "validurls" in normalized_id:
+            return self._evaluate_valid_urls_check(check_id, parameters, request_payload)
+        if "containscode" in normalized_id:
+            return self._evaluate_contains_code_check(check_id, parameters, request_payload)
+        if "notnull" in normalized_id:
+            return self._evaluate_not_null_check(check_id, parameters, request_payload)
+        if normalized_id in ("default.contains", "contains"):
+            return self._evaluate_contains_check(check_id, parameters, request_payload)
+        if "modelwhitelist" in normalized_id:
+            return self._evaluate_model_whitelist_check(check_id, parameters, request_payload)
+        if "modelrules" in normalized_id:
+            return self._evaluate_model_rules_check(check_id, parameters, request_payload)
+        if "allowedrequesttypes" in normalized_id:
+            return self._evaluate_allowed_request_types_check(check_id, parameters, request_payload)
+        if "requiredmetadatakeyvalue" in normalized_id:
+            return self._evaluate_required_metadata_kv_check(check_id, parameters, request_payload)
+        if "requiredmetadatakey" in normalized_id:
+            return self._evaluate_required_metadata_keys_check(check_id, parameters, request_payload)
+
         return {
             "id": check_id,
             "verdict": True,
@@ -443,6 +480,533 @@ class ChatService:
             "id": check_id,
             "verdict": verdict,
             "explanation": explanation,
+        }
+
+    # ── Deterministic BASIC check evaluators ─────────────────────────
+
+    def _evaluate_sentence_count_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content contains a certain number of sentences."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        sentences = [s.strip() for s in re.split(r"[.!?]+", text) if s.strip()]
+        count = len(sentences)
+        try:
+            min_s = int(parameters.get("minSentences", 0))
+        except (TypeError, ValueError):
+            min_s = 0
+        try:
+            max_s = int(parameters.get("maxSentences", 999999))
+        except (TypeError, ValueError):
+            max_s = 999999
+        verdict = min_s <= count <= max_s
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Sentence count ({count}) {'is' if verdict else 'is not'} "
+                f"within range {min_s}–{max_s}."
+            ),
+        }
+
+    def _evaluate_word_count_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content contains a certain number of words."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        count = len(text.split())
+        try:
+            min_w = int(parameters.get("minWords", 0))
+        except (TypeError, ValueError):
+            min_w = 0
+        try:
+            max_w = int(parameters.get("maxWords", 999999))
+        except (TypeError, ValueError):
+            max_w = 999999
+        verdict = min_w <= count <= max_w
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Word count ({count}) {'is' if verdict else 'is not'} "
+                f"within range {min_w}–{max_w}."
+            ),
+        }
+
+    def _evaluate_character_count_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content contains a certain number of characters."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        count = len(text)
+        try:
+            min_c = int(parameters.get("minCharacters", 0))
+        except (TypeError, ValueError):
+            min_c = 0
+        try:
+            max_c = int(parameters.get("maxCharacters", 9999999))
+        except (TypeError, ValueError):
+            max_c = 9999999
+        verdict = min_c <= count <= max_c
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Character count ({count}) {'is' if verdict else 'is not'} "
+                f"within range {min_c}–{max_c}."
+            ),
+        }
+
+    def _evaluate_uppercase_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content has all uppercase letters."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        is_upper = text == text.upper() if text.strip() else False
+        invert = bool(parameters.get("not", False))
+        verdict = (not is_upper) if invert else is_upper
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Text {'is' if is_upper else 'is not'} all uppercase"
+                f"{' (inverted)' if invert else ''}."
+            ),
+        }
+
+    def _evaluate_lowercase_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content is all lowercase."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        is_lower = text == text.lower() if text.strip() else False
+        invert = bool(parameters.get("not", False))
+        verdict = (not is_lower) if invert else is_lower
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Text {'is' if is_lower else 'is not'} all lowercase"
+                f"{' (inverted)' if invert else ''}."
+            ),
+        }
+
+    def _evaluate_ends_with_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content ends with a specified string."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        suffix = str(parameters.get("Suffix") or parameters.get("suffix") or "")
+        if not suffix:
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Ends-with check is missing a Suffix parameter.",
+            }
+        verdict = text.rstrip().endswith(suffix)
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": f"Text {'ends' if verdict else 'does not end'} with '{suffix}'.",
+        }
+
+    def _evaluate_json_schema_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if response JSON matches a JSON schema."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        schema = parameters.get("schema")
+        if not isinstance(schema, dict):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "JSON Schema check is missing a valid schema parameter.",
+            }
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Content is not valid JSON.",
+            }
+        verdict, explanation = self._validate_json_against_schema(data, schema)
+        return {"id": check_id, "verdict": verdict, "explanation": explanation}
+
+    @staticmethod
+    def _validate_json_against_schema(
+        data: Any, schema: dict[str, Any]
+    ) -> tuple[bool, str]:
+        """Minimal JSON schema validation (type, required, properties)."""
+        schema_type = schema.get("type")
+        if schema_type:
+            type_map: dict[str, type | tuple[type, ...]] = {
+                "object": dict,
+                "array": list,
+                "string": str,
+                "number": (int, float),
+                "boolean": bool,
+            }
+            expected = type_map.get(schema_type)
+            if expected and not isinstance(data, expected):
+                return False, f"Expected type '{schema_type}', got '{type(data).__name__}'."
+        if isinstance(data, dict):
+            required = schema.get("required", [])
+            for key in required:
+                if key not in data:
+                    return False, f"Missing required key: '{key}'."
+            properties = schema.get("properties", {})
+            for key, prop_schema in properties.items():
+                if key in data and isinstance(prop_schema, dict):
+                    ok, msg = ChatService._validate_json_against_schema(data[key], prop_schema)
+                    if not ok:
+                        return False, f"Property '{key}': {msg}"
+        return True, "JSON matches the schema."
+
+    def _evaluate_json_keys_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if response JSON contains any, all or none of the mentioned keys."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        keys = parameters.get("keys", [])
+        operator = str(parameters.get("operator", "all")).lower()
+        if not isinstance(keys, list):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "JSON Keys check requires a 'keys' array.",
+            }
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Content is not valid JSON.",
+            }
+        if not isinstance(data, dict):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Content is not a JSON object.",
+            }
+        if operator == "all":
+            verdict = all(k in data for k in keys)
+        elif operator == "any":
+            verdict = any(k in data for k in keys)
+        elif operator == "none":
+            verdict = not any(k in data for k in keys)
+        else:
+            verdict = all(k in data for k in keys)
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"JSON keys check ({operator}): {'passed' if verdict else 'failed'}. "
+                f"Expected keys: {keys}."
+            ),
+        }
+
+    def _evaluate_valid_urls_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if all URLs mentioned in the content are valid."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        url_pattern = re.compile(r"https?://[^\s<>\"{}|\\^`\[\]]+")
+        urls = url_pattern.findall(text)
+        if not urls:
+            return {
+                "id": check_id,
+                "verdict": True,
+                "explanation": "No URLs found in content.",
+            }
+        invalid = []
+        for url in urls:
+            parsed = urlparse(url)
+            if not parsed.scheme or not parsed.netloc:
+                invalid.append(url)
+        verdict = len(invalid) == 0
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"All {len(urls)} URL(s) are valid."
+                if verdict
+                else f"{len(invalid)} URL(s) are invalid: {', '.join(invalid[:3])}."
+            ),
+        }
+
+    def _evaluate_contains_code_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content contains code of a specific format."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        code_format = str(parameters.get("format", "")).lower()
+        patterns: dict[str, str] = {
+            "sql": r"\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|JOIN)\b",
+            "python": r"\b(def |class |import |from .+ import|if __name__)",
+            "typescript": r"\b(interface |type |const |let |function |=>|import \{)",
+            "javascript": r"\b(function |const |let |var |=>|require\(|import )",
+        }
+        pattern = patterns.get(
+            code_format,
+            r"```[\s\S]*?```|\b(def |function |class |SELECT |import )",
+        )
+        verdict = bool(re.search(pattern, text, re.IGNORECASE))
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Content {'contains' if verdict else 'does not contain'} "
+                f"{code_format or 'any'} code."
+            ),
+        }
+
+    def _evaluate_not_null_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if the response content is not null, undefined, or empty."""
+        text = str(request_payload.get("request", {}).get("text", ""))
+        is_not_null = bool(text.strip())
+        invert = bool(parameters.get("not", False))
+        verdict = (not is_not_null) if invert else is_not_null
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Content {'is not' if is_not_null else 'is'} null/empty"
+                f"{' (inverted)' if invert else ''}."
+            ),
+        }
+
+    def _evaluate_contains_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if content contains any, all or none of the words or phrases."""
+        text = str(request_payload.get("request", {}).get("text", "")).lower()
+        words = parameters.get("words", [])
+        operator = str(parameters.get("operator", "any")).lower()
+        if not isinstance(words, list):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Contains check requires a 'words' array.",
+            }
+        matched = [w for w in words if str(w).lower() in text]
+        if operator == "all":
+            verdict = len(matched) == len(words)
+        elif operator == "none":
+            verdict = len(matched) == 0
+        else:
+            verdict = len(matched) > 0
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Contains check ({operator}): {'passed' if verdict else 'failed'}. "
+                f"Words: {words}, matched: {matched}."
+            ),
+        }
+
+    def _evaluate_model_whitelist_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if the inference model is in the whitelist."""
+        model = str(
+            request_payload.get("request", {}).get("json", {}).get("model", "")
+        ).strip().lower()
+        models = parameters.get("Models") or parameters.get("models") or []
+        inverse = bool(parameters.get("Inverse") or parameters.get("inverse", False))
+        if not isinstance(models, list):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Model Whitelist requires a 'Models' array.",
+            }
+        models_lower = [str(m).strip().lower() for m in models]
+        in_list = model in models_lower
+        verdict = (not in_list) if inverse else in_list
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Model '{model}' {'is' if in_list else 'is not'} in whitelist"
+                f"{' (inverted)' if inverse else ''}."
+            ),
+        }
+
+    def _evaluate_model_rules_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Allow requests based on metadata-driven rules mapping to allowed models."""
+        model = str(
+            request_payload.get("request", {}).get("json", {}).get("model", "")
+        ).strip().lower()
+        metadata = request_payload.get("metadata", {})
+        rules = parameters.get("rules", {})
+        invert = bool(parameters.get("not", False))
+        if not isinstance(rules, dict):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Model Rules requires a 'rules' object.",
+            }
+        verdict = True
+        for meta_key, allowed_models in rules.items():
+            if meta_key in metadata:
+                if isinstance(allowed_models, list) and model not in [
+                    str(m).strip().lower() for m in allowed_models
+                ]:
+                    verdict = False
+                    break
+        if invert:
+            verdict = not verdict
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Model rules check {'passed' if verdict else 'failed'} "
+                f"for model '{model}'."
+            ),
+        }
+
+    def _evaluate_allowed_request_types_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Control which request types can be processed."""
+        request_type = "chat"
+        allowed = parameters.get("allowedTypes", [])
+        blocked = parameters.get("blockedTypes", [])
+        if isinstance(blocked, list) and request_type in blocked:
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": f"Request type '{request_type}' is blocked.",
+            }
+        if isinstance(allowed, list) and allowed and request_type not in allowed:
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": f"Request type '{request_type}' is not in allowed list.",
+            }
+        return {
+            "id": check_id,
+            "verdict": True,
+            "explanation": f"Request type '{request_type}' is allowed.",
+        }
+
+    def _evaluate_required_metadata_keys_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if metadata contains all the required keys."""
+        metadata = request_payload.get("metadata", {})
+        keys = parameters.get("metadataKeys", [])
+        operator = str(parameters.get("operator", "all")).lower()
+        if not isinstance(keys, list):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Required Metadata Keys needs a 'metadataKeys' array.",
+            }
+        if operator == "all":
+            verdict = all(k in metadata for k in keys)
+        elif operator == "any":
+            verdict = any(k in metadata for k in keys)
+        elif operator == "none":
+            verdict = not any(k in metadata for k in keys)
+        else:
+            verdict = all(k in metadata for k in keys)
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Metadata keys check ({operator}): "
+                f"{'passed' if verdict else 'failed'}. Required: {keys}."
+            ),
+        }
+
+    def _evaluate_required_metadata_kv_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Check if metadata contains specified key-value pairs."""
+        metadata = request_payload.get("metadata", {})
+        pairs = parameters.get("metadataPairs", {})
+        operator = str(parameters.get("operator", "all")).lower()
+        if not isinstance(pairs, dict):
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "Required Metadata KV Pairs needs a 'metadataPairs' object.",
+            }
+        matches = [
+            k in metadata and str(metadata[k]) == str(v) for k, v in pairs.items()
+        ]
+        if operator == "all":
+            verdict = all(matches)
+        elif operator == "any":
+            verdict = any(matches)
+        elif operator == "none":
+            verdict = not any(matches)
+        else:
+            verdict = all(matches)
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": (
+                f"Metadata KV check ({operator}): "
+                f"{'passed' if verdict else 'failed'}."
+            ),
         }
 
     async def _evaluate_webhook_check(
