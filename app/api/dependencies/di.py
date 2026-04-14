@@ -54,6 +54,7 @@ from app.infrastructure.database.repositories import (
     ProviderRepository,
 )
 from app.services.chat_service import ChatService
+from app.services.config_service import ConfigService
 from app.services.log_service import LogService
 from app.services.policy_service import PolicyService
 from app.services.provider_service import ProviderService
@@ -229,6 +230,23 @@ def get_policy_service(
         adapter=adapter,
         log_service=log_service,
     )
+
+
+# ======================================================================
+# Factory: get_config_service
+# ======================================================================
+
+
+def get_config_service(
+    provider_repo: ProviderRepository = Depends(get_provider_repo),
+    adapter: GatewayProvider = Depends(get_adapter),
+) -> ConfigService:
+    """Create a ConfigService with ProviderRepository and GatewayProvider."""
+    if not isinstance(provider_repo, ProviderRepository):
+        provider_repo = ProviderRepository(session=None)  # type: ignore[arg-type]
+    if not isinstance(adapter, GatewayProvider):
+        adapter = get_adapter()
+    return ConfigService(provider_repo=provider_repo, adapter=adapter)
 
 
 # ======================================================================

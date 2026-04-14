@@ -50,6 +50,46 @@ class GatewayProvider(abc.ABC):
     ) -> Union[list[dict], GatewayError]:
         """Retrieve the list of all security policies from the provider."""
 
+    # ── Config CRUD ──────────────────────────────────────────────────
+
+    @abc.abstractmethod
+    async def create_config(
+        self, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        """Create a config on the provider side."""
+
+    @abc.abstractmethod
+    async def list_configs(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        """List all configs from the provider."""
+
+    @abc.abstractmethod
+    async def retrieve_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        """Retrieve a single config by slug."""
+
+    @abc.abstractmethod
+    async def update_config(
+        self, slug: str, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        """Update an existing config."""
+
+    @abc.abstractmethod
+    async def delete_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[bool, GatewayError]:
+        """Delete a config on the provider side."""
+
+    # ── Integrations ─────────────────────────────────────────────────
+
+    @abc.abstractmethod
+    async def list_integrations(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        """List LLM integrations from the provider."""
+
     # [GRN] Non-abstract methods with default implementations.
     # Concrete adapters SHOULD override these for proper resource management.
     # Not abstract to preserve backward compatibility with existing adapters.

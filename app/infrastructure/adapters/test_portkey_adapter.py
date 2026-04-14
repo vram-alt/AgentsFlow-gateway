@@ -16,7 +16,7 @@ from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.dto.unified_prompt import MessageItem, UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse
-from app.infrastructure.adapters.portkey_adapter import PortkeyAdapter
+from app.infrastructure.adapters.portkey_adapter import PortkeyAdapter, _DEMO_CONFIGS
 
 # --- Константы ---
 API_KEY = "pk-test-key-1234567890"
@@ -808,3 +808,36 @@ class TestLifecycle:
         client = a._get_http_client()
         assert isinstance(client, httpx.AsyncClient)
         await client.aclose()
+
+
+class TestDemoModeConfigCrud:
+    @pytest.mark.asyncio
+    async def test_list_configs_returns_demo_seed(self):
+        a = PortkeyAdapter()
+        with patch.object(a, "_is_demo_mode", return_value=True):
+            result = await a.list_configs(API_KEY, BASE_URL)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        assert any(item.get("slug") == "starter-demo-config" for item in result)
+
+    @pytest.mark.asyncio
+    async def test_create_config_persists_into_following_list_call(self):
+        a = PortkeyAdapter()
+        original = list(_DEMO_CONFIGS)
+        try:
+            with patch.object(a, "_is_demo_mode", return_value=True):
+                created = await a.create_config(
+                    {
+                        "name": "QA Visible Config",
+                        "config": {"cache": {"mode": "simple", "max_age": 30}},
+                    },
+                    API_KEY,
+                    BASE_URL,
+                )
+                listed = await a.list_configs(API_KEY, BASE_URL)
+            assert isinstance(created, dict)
+            assert any(item.get("id") == created.get("id") for item in listed)
+            assert any(item.get("slug") == "qa-visible-config" for item in listed)
+        finally:
+            _DEMO_CONFIGS.clear()
+            _DEMO_CONFIGS.extend(original)

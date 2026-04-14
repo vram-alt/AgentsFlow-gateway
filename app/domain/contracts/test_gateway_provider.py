@@ -106,6 +106,36 @@ class _ConcreteProvider(GatewayProvider):
     ) -> Union[list[dict], GatewayError]:
         return []
 
+    async def create_config(
+        self, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        return {"id": "cfg-001"}
+
+    async def list_configs(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        return []
+
+    async def retrieve_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        return {"config": {}}
+
+    async def update_config(
+        self, slug: str, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        return {"version_id": "v-001"}
+
+    async def delete_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[bool, GatewayError]:
+        return True
+
+    async def list_integrations(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        return []
+
 
 @pytest.fixture()
 def concrete_provider() -> _ConcreteProvider:
@@ -173,6 +203,24 @@ class TestGatewayProviderCannotInstantiate:
                 pass
 
             async def list_guardrails(self, api_key, base_url):
+                pass
+
+            async def create_config(self, config, api_key, base_url):
+                pass
+
+            async def list_configs(self, api_key, base_url):
+                pass
+
+            async def retrieve_config(self, slug, api_key, base_url):
+                pass
+
+            async def update_config(self, slug, config, api_key, base_url):
+                pass
+
+            async def delete_config(self, slug, api_key, base_url):
+                pass
+
+            async def list_integrations(self, api_key, base_url):
                 pass
 
         with pytest.raises(TypeError):
@@ -405,6 +453,12 @@ class TestGatewayProviderAbstractCompleteness:
             "update_guardrail",
             "delete_guardrail",
             "list_guardrails",
+            "create_config",
+            "list_configs",
+            "retrieve_config",
+            "update_config",
+            "delete_config",
+            "list_integrations",
         }
     )
 

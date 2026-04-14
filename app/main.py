@@ -20,6 +20,7 @@ from fastapi.responses import JSONResponse
 
 from app.api.dependencies.di import get_adapter
 from app.api.routes.chat import router as chat_router
+from app.api.routes.configs import router as configs_router
 from app.api.routes.logs import router as logs_router
 from app.api.routes.policies import router as policies_router
 from app.api.routes.providers import router as providers_router
@@ -255,6 +256,7 @@ async def health() -> dict[str, str]:
 # ---------------------------------------------------------------------------
 
 app.include_router(chat_router)
+app.include_router(configs_router)
 app.include_router(policies_router)
 app.include_router(providers_router)
 app.include_router(webhook_router)

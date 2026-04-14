@@ -24,6 +24,14 @@ const nextConfig: NextConfig = {
         destination: `${internalApiBase}/api/logs/`,
       },
       {
+        source: "/api/configs",
+        destination: `${internalApiBase}/api/configs/`,
+      },
+      {
+        source: "/api/configs/",
+        destination: `${internalApiBase}/api/configs/`,
+      },
+      {
         source: "/api/:path*",
         destination: `${internalApiBase}/api/:path*`,
       },

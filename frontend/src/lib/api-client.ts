@@ -289,6 +289,51 @@ export interface TesterFormSchema {
     }>;
 }
 
+// ─── Config Types ───────────────────────────────────────────────────────
+
+export interface PortkeyConfig {
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    is_default: number;
+    created_at: string;
+    last_updated_at: string;
+}
+
+export interface PortkeyConfigDetail {
+    config: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface ConfigCreateRequest {
+    name: string;
+    config: Record<string, unknown>;
+    is_default?: number;
+    provider_name?: string;
+}
+
+export interface ConfigUpdateRequest {
+    name?: string | null;
+    config?: Record<string, unknown> | null;
+    status?: string | null;
+}
+
+export interface PortkeyIntegration {
+    id: string;
+    name: string;
+    slug: string;
+    ai_provider_id: string;
+    status: string;
+    created_at: string;
+}
+
+export interface PortkeyGuardrail {
+    remote_id: string;
+    name: string;
+    config: Record<string, unknown>;
+}
+
 // ─── API Methods ────────────────────────────────────────────────────────
 
 // Health
@@ -431,4 +476,31 @@ export const api = {
             method: "PUT",
             body: JSON.stringify({ enabled }),
         }),
+
+    // Configs (Portkey)
+    listConfigs: () => apiFetch<PortkeyConfig[]>("/api/configs/"),
+    createConfig: (data: ConfigCreateRequest) =>
+        apiFetch<{ id: string; version_id: string }>("/api/configs/", {
+            method: "POST",
+            body: JSON.stringify(data),
+        }),
+    retrieveConfig: (slug: string) =>
+        apiFetch<PortkeyConfigDetail>(`/api/configs/${slug}`),
+    updateConfig: (slug: string, data: ConfigUpdateRequest) =>
+        apiFetch<{ version_id: string }>(`/api/configs/${slug}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+        }),
+    deleteConfig: (slug: string) =>
+        apiFetch<{ status: string }>(`/api/configs/${slug}`, {
+            method: "DELETE",
+        }),
+    toggleConfig: (slug: string) =>
+        apiFetch<unknown>(`/api/configs/${slug}/toggle`, {
+            method: "PATCH",
+        }),
+    listConfigGuardrails: () =>
+        apiFetch<PortkeyGuardrail[]>("/api/configs/guardrails"),
+    listIntegrations: () =>
+        apiFetch<PortkeyIntegration[]>("/api/configs/integrations"),
 };
