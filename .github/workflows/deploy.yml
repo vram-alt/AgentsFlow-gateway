@@ -16,12 +16,13 @@ jobs:
 
       - name: Deploy to EC2 via SSH
         uses: appleboy/ssh-action@v1
+        env:
+          PORTKEY_ADMIN_KEY: ${{ secrets.PORTKEY_ADMIN_API_KEY }}
         with:
           host: 13.223.77.71
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          PORTKEY_ADMIN_KEY: ${{ secrets.PORTKEY_ADMIN_API_KEY }}
           envs: PORTKEY_ADMIN_KEY
           script: |
             set -e
