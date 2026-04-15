@@ -15,13 +15,14 @@ if [ -f /app/data-seed/gateway.db ] && [ ! -f /app/data/gateway.db ]; then
 fi
 
 # ── Run Alembic migrations ───────────────────────────────────────────
-# This Docker setup ships with a pre-seeded SQLite database. If the DB file is
-# already present, mark it as current instead of replaying the initial migration.
+# Always run upgrade head — Alembic is idempotent and will only apply
+# pending migrations.  This keeps existing data safe while applying
+# any schema changes introduced by a new deployment.
 if [ -f /app/data/gateway.db ]; then
-    echo "🪪 SQLite database detected; stamping Alembic head..."
-    python -m alembic stamp head
+    echo "🔄 Existing database detected; applying pending migrations..."
+    python -m alembic upgrade head
 else
-    echo "🔄 Running database migrations..."
+    echo "🔄 No database found; running full migration..."
     python -m alembic upgrade head
 fi
 
