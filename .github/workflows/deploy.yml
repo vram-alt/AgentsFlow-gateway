@@ -83,7 +83,7 @@ jobs:
 
             echo "=== Post-deploy verification ==="
             AUTH=$(echo -n "gateway_operator:Str0ng!Pass#2024" | base64)
-            HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" -H "Authorization: Basic $AUTH" http://localhost:8000/api/providers/)
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Basic $AUTH" http://localhost:8000/api/providers/ || true)
             echo "GET /api/providers/ => HTTP $HTTP_CODE"
             if [ "$HTTP_CODE" != "200" ]; then
               echo "⚠️ Providers endpoint returned $HTTP_CODE — dumping logs:"
