@@ -21,10 +21,18 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
-          script_stop: true
           script: |
             set -e
-            cd /home/ubuntu/ai-gateway-poc
+            APP_DIR="/home/ubuntu/ai-gateway-poc"
+
+            # Clone if not a git repo, otherwise pull
+            if [ ! -d "$APP_DIR/.git" ]; then
+              echo "=== Cloning repository ==="
+              rm -rf "$APP_DIR"
+              git clone https://github.com/vram-alt/AgentsFlow-gateway.git "$APP_DIR"
+            fi
+
+            cd "$APP_DIR"
 
             echo "=== Pulling latest code ==="
             git fetch origin main
