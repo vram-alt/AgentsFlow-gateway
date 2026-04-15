@@ -21,6 +21,8 @@ jobs:
           username: ubuntu
           key: ${{ secrets.EC2_SSH_KEY }}
           port: 22
+          PORTKEY_ADMIN_KEY: ${{ secrets.PORTKEY_ADMIN_API_KEY }}
+          envs: PORTKEY_ADMIN_KEY
           script: |
             set -e
             APP_DIR="/home/ubuntu/ai-gateway-poc"
@@ -53,6 +55,16 @@ jobs:
               echo "Clearing stale database (encryption key changed)..."
               docker compose down -v 2>/dev/null || true
               touch .env.ready
+            fi
+
+            # Inject Portkey admin key (always update from secret)
+            if [ -n "$PORTKEY_ADMIN_KEY" ]; then
+              if grep -q '^PORTKEY_ADMIN_API_KEY=' .env; then
+                sed -i "s|^PORTKEY_ADMIN_API_KEY=.*|PORTKEY_ADMIN_API_KEY=${PORTKEY_ADMIN_KEY}|" .env
+              else
+                echo "PORTKEY_ADMIN_API_KEY=${PORTKEY_ADMIN_KEY}" >> .env
+              fi
+              echo "Injected PORTKEY_ADMIN_API_KEY from secret"
             fi
 
             echo "=== Validating .env ==="
