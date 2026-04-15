@@ -52,8 +52,19 @@ jobs:
               echo "Generated .env with real secrets"
             fi
 
+            echo "=== Validating .env ==="
+            echo "ENCRYPTION_KEY length: $(grep '^ENCRYPTION_KEY=' .env | cut -d= -f2 | tr -d '\n' | wc -c)"
+            echo "WEBHOOK_SECRET length: $(grep '^WEBHOOK_SECRET=' .env | cut -d= -f2 | tr -d '\n' | wc -c)"
+            echo "CORS_ORIGINS: $(grep '^CORS_ORIGINS=' .env | cut -d= -f2)"
+            echo "NEXT_PUBLIC_API_URL: $(grep '^NEXT_PUBLIC_API_URL=' .env | cut -d= -f2)"
+            if grep -q "CHANGE_ME" .env; then
+              echo "❌ ERROR: .env still contains placeholder values!"
+              exit 1
+            fi
+
             echo "=== Building and deploying ==="
             docker compose build
+            docker compose down
             docker compose up -d
 
             echo "=== Waiting for health check ==="
@@ -69,6 +80,15 @@ jobs:
               fi
               sleep 2
             done
+
+            echo "=== Post-deploy verification ==="
+            AUTH=$(echo -n "gateway_operator:Str0ng!Pass#2024" | base64)
+            HTTP_CODE=$(curl -sf -o /dev/null -w "%{http_code}" -H "Authorization: Basic $AUTH" http://localhost:8000/api/providers/)
+            echo "GET /api/providers/ => HTTP $HTTP_CODE"
+            if [ "$HTTP_CODE" != "200" ]; then
+              echo "⚠️ Providers endpoint returned $HTTP_CODE — dumping logs:"
+              docker compose logs --tail=30 backend
+            fi
 
             echo "=== Cleaning up old images ==="
             docker image prune -f
