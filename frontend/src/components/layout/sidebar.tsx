@@ -12,6 +12,7 @@ import {
     Settings,
     Zap,
     Shield,
+    FileCode,
     ChevronLeft,
     ChevronRight,
     LogOut,
@@ -42,6 +43,11 @@ const navItems = [
         title: "Policies",
         href: "/configuration/policies",
         icon: Shield,
+    },
+    {
+        title: "Configs",
+        href: "/configuration/configs",
+        icon: FileCode,
     },
     {
         title: "Settings",

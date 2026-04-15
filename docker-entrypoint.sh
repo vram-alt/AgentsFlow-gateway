@@ -15,8 +15,17 @@ if [ -f /app/data-seed/gateway.db ] && [ ! -f /app/data/gateway.db ]; then
 fi
 
 # ── Run Alembic migrations ───────────────────────────────────────────
-echo "🔄 Running database migrations..."
-python -m alembic upgrade head
+# Always run upgrade head — Alembic is idempotent and will only apply
+# pending migrations.  This keeps existing data safe while applying
+# any schema changes introduced by a new deployment.
+if [ -f /app/data/gateway.db ]; then
+    echo "🔄 Existing database detected; applying pending migrations..."
+    python -m alembic upgrade head
+else
+    echo "🔄 No database found; running full migration..."
+    python -m alembic upgrade head
+fi
+
 echo "✅ Migrations complete"
 
 # ── Start the application ────────────────────────────────────────────

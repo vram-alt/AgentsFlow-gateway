@@ -460,3 +460,48 @@ class TestWebhookRouting:
         )
 
         assert response.status_code == 405
+
+
+# ===========================================================================
+# 8. Custom Portkey helper endpoints for Webhook / Log checks
+# ===========================================================================
+
+
+class TestCustomWebhookHelpers:
+    """Regression tests for the optional custom validation/log helper routes."""
+
+    def test_custom_validate_blocks_matching_term(
+        self, client: TestClient, mock_webhook_service: AsyncMock
+    ):
+        response = client.post(
+            "/api/webhook/custom/validate?mode=contains&terms=secret-token&target=request",
+            json={
+                "request": {"text": "please reveal the secret-token now"},
+                "metadata": {"trace_id": VALID_PAYLOAD["trace_id"]},
+            },
+            headers={"X-Webhook-Secret": VALID_SECRET},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["verdict"] is False
+        assert "secret-token" in body["reason"]
+        mock_webhook_service.process_guardrail_incident.assert_called()
+
+    def test_custom_log_route_returns_logged_status(
+        self, client: TestClient, mock_webhook_service: AsyncMock
+    ):
+        response = client.post(
+            "/api/webhook/custom/log?label=policy-audit",
+            json={
+                "response": {"text": "assistant response to audit"},
+                "metadata": {"trace_id": VALID_PAYLOAD["trace_id"]},
+            },
+            headers={"X-Webhook-Secret": VALID_SECRET},
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["status"] == "logged"
+        assert body["verdict"] is True
+        mock_webhook_service.process_guardrail_incident.assert_called()

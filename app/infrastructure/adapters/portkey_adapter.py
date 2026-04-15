@@ -9,7 +9,9 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import uuid
+from datetime import UTC, datetime
 from typing import Any, Union
 
 import httpx
@@ -20,6 +22,67 @@ from app.domain.dto.unified_prompt import UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse, UsageInfo
 
 _EXTERNAL_HTTP_TIMEOUT: int | None = None
+
+
+def _demo_now_iso() -> str:
+    """Return a stable ISO timestamp for demo objects."""
+    return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
+def _slugify(value: str) -> str:
+    """Create a URL-friendly slug for demo config IDs."""
+    slug = re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
+    return slug or f"demo-{uuid.uuid4().hex[:8]}"
+
+
+_DEMO_INTEGRATIONS: list[dict[str, Any]] = [
+    {
+        "id": "demo-openai",
+        "name": "Demo OpenAI",
+        "slug": "demo-openai",
+        "ai_provider_id": "openai",
+        "status": "active",
+        "created_at": _demo_now_iso(),
+    },
+    {
+        "id": "demo-anthropic",
+        "name": "Demo Anthropic",
+        "slug": "demo-anthropic",
+        "ai_provider_id": "anthropic",
+        "status": "active",
+        "created_at": _demo_now_iso(),
+    },
+]
+
+_DEMO_GUARDRAILS: list[dict[str, Any]] = [
+    {
+        "remote_id": "demo-pii-check",
+        "name": "PII Protection",
+        "config": {"type": "contains_pii", "deny": True},
+    },
+    {
+        "remote_id": "demo-toxicity-check",
+        "name": "Toxicity Filter",
+        "config": {"type": "toxicity", "deny": False},
+    },
+]
+
+_DEMO_CONFIGS: list[dict[str, Any]] = [
+    {
+        "id": "demo-cfg-starter",
+        "name": "Starter Demo Config",
+        "slug": "starter-demo-config",
+        "status": "active",
+        "is_default": 1,
+        "created_at": _demo_now_iso(),
+        "last_updated_at": _demo_now_iso(),
+        "config": {
+            "targets": [{"virtual_key": "demo-openai"}],
+            "retry": {"attempts": 2},
+            "cache": {"mode": "simple", "max_age": 60},
+        },
+    }
+]
 
 
 def _get_external_http_timeout() -> int:
@@ -62,35 +125,117 @@ _MODEL_PROVIDER_PREFIXES: list[tuple[str, str]] = [
     ("deepseek-", "deepseek"),
 ]
 
+_EXPLICIT_PROVIDER_ALIASES: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "groq": "groq",
+    "google": "google",
+    "openrouter": "openrouter",
+    "cohere": "cohere",
+    "mistral": "mistral-ai",
+    "mistral-ai": "mistral-ai",
+    "deepseek": "deepseek",
+}
+
+_EMBEDDING_MODEL_ALIASES: dict[str, str] = {
+    "ada-v2": "text-embedding-ada-002",
+}
+
+_INVALID_VIRTUAL_KEY_VALUES = {"", "null", "none", "undefined"}
+
+
+def _sanitize_virtual_key(value: str | None) -> str | None:
+    """Normalize blank or null-like virtual-key values to None."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if cleaned.lower() in _INVALID_VIRTUAL_KEY_VALUES:
+        return None
+    return cleaned
+
+
+def _get_virtual_key_for_provider(
+    virtual_keys: dict[str, str] | None, llm_provider: str
+) -> str | None:
+    """Return the matching virtual key for the requested provider, if valid."""
+    if not virtual_keys:
+        return None
+    return _sanitize_virtual_key(virtual_keys.get(llm_provider)) or _sanitize_virtual_key(
+        virtual_keys.get("_default")
+    )
+
+
+def _normalize_model_name(model: str) -> str:
+    """Normalize friendly aliases to the upstream provider model name."""
+    return _EMBEDDING_MODEL_ALIASES.get(model.strip().lower(), model)
+
+
+def _is_embedding_model(model: str) -> bool:
+    """Return True when the request targets an embeddings-only model."""
+    normalized = _normalize_model_name(model).lower().strip()
+    return normalized.startswith("text-embedding-")
+
+
+def _extract_prompt_input(prompt: UnifiedPrompt) -> str:
+    """Use the latest user message as the input for embedding requests."""
+    for message in reversed(prompt.messages):
+        if message.role == "user" and message.content.strip():
+            return message.content
+    for message in reversed(prompt.messages):
+        if message.content.strip():
+            return message.content
+    return ""
+
 
 def _infer_provider_from_model(model: str) -> str:
     """Infer the LLM provider slug from the model name for x-portkey-provider header.
 
     Falls back to 'openai' if no prefix matches (most common case).
     """
-    model_lower = model.lower()
+    model_lower = model.lower().strip()
+
+    if model_lower.startswith("@") and "/" in model_lower:
+        explicit_provider, remainder = model_lower[1:].split("/", 1)
+        if explicit_provider in _EXPLICIT_PROVIDER_ALIASES:
+            return _EXPLICIT_PROVIDER_ALIASES[explicit_provider]
+        model_lower = remainder
+
     for prefix, provider in _MODEL_PROVIDER_PREFIXES:
         if model_lower.startswith(prefix):
             return provider
     return "openai"
 
 
-def _parse_api_key(api_key: str) -> tuple[str, str | None]:
-    """Parse api_key field to extract Portkey API key and optional virtual key slug.
+def _parse_api_key(api_key: str) -> tuple[str, dict[str, str]]:
+    """Parse api_key field to extract Portkey API key and virtual key mapping.
 
-    Supports two formats:
-    1. Plain Portkey API key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5"
-       -> returns (portkey_api_key, None)
-    2. Portkey API key with virtual key: "nO1U6Ot+zKpWXzRpb8H1Y4tQoy+5::test"
-       -> returns (portkey_api_key, "test")
+    Supports three formats:
+    1. Plain Portkey API key: "KEY"
+       -> returns (KEY, {})
+    2. Single virtual key (legacy): "KEY::slug"
+       -> returns (KEY, {"_default": "slug"})
+    3. Multi virtual keys: "KEY::google=dev,anthropic=dev-anthropic,openai=dev-openai"
+       -> returns (KEY, {"google": "dev", "anthropic": "dev-anthropic", ...})
 
-    The '::' separator is used because neither Portkey API keys nor
-    virtual key slugs contain this sequence.
+    Format 3 is detected when the part after '::' contains '='.
+    Blank or null-like virtual key values are ignored.
     """
-    if "::" in api_key:
-        parts = api_key.split("::", 1)
-        return parts[0], parts[1]
-    return api_key, None
+    if "::" not in api_key:
+        return api_key, {}
+    portkey_key, vk_part = api_key.split("::", 1)
+    if "=" in vk_part:
+        mapping: dict[str, str] = {}
+        for pair in vk_part.split(","):
+            pair = pair.strip()
+            if "=" in pair:
+                provider_slug, vk_slug = pair.split("=", 1)
+                normalized_slug = provider_slug.strip()
+                normalized_key = _sanitize_virtual_key(vk_slug)
+                if normalized_slug and normalized_key:
+                    mapping[normalized_slug] = normalized_key
+        return portkey_key, mapping
+    default_key = _sanitize_virtual_key(vk_part)
+    return portkey_key, ({"_default": default_key} if default_key else {})
 
 
 class PortkeyAdapter(GatewayProvider):
@@ -113,10 +258,28 @@ class PortkeyAdapter(GatewayProvider):
         self, prompt: UnifiedPrompt, api_key: str, base_url: str
     ) -> Union[UnifiedResponse, GatewayError]:
         try:
-            portkey_key, virtual_key = _parse_api_key(api_key)
-            llm_provider = _infer_provider_from_model(prompt.model)
+            portkey_key, virtual_keys = _parse_api_key(api_key)
+            normalized_model = _normalize_model_name(prompt.model)
+            is_embedding_request = _is_embedding_model(normalized_model)
+            llm_provider = _infer_provider_from_model(normalized_model)
+            selected_virtual_key = _get_virtual_key_for_provider(
+                virtual_keys, llm_provider
+            )
+
+            if llm_provider == "openrouter" and virtual_keys and selected_virtual_key is None:
+                return GatewayError(
+                    trace_id=prompt.trace_id,
+                    error_code=GatewayError.AUTH_FAILED,
+                    message=(
+                        "OpenRouter is not configured for this Portkey provider — "
+                        "add a valid OpenRouter virtual key slug in Configuration > Providers."
+                    ),
+                    status_code=400,
+                    provider_name="portkey",
+                )
+
             headers = self._build_headers(
-                portkey_key, llm_provider=llm_provider, virtual_key=virtual_key
+                portkey_key, llm_provider=llm_provider, virtual_keys=virtual_keys
             )
             headers["x-portkey-trace-id"] = prompt.trace_id
             if prompt.guardrail_ids:
@@ -136,22 +299,29 @@ class PortkeyAdapter(GatewayProvider):
                 }
                 headers["x-portkey-config"] = json.dumps(guardrail_config)
                 headers["x-portkey-guardrails"] = json.dumps(list(prompt.guardrail_ids))
-            body: dict[str, Any] = {
-                "model": prompt.model,
-                "messages": [
-                    {"role": m.role, "content": m.content} for m in prompt.messages
-                ],
-            }
-            if prompt.temperature is not None:
-                body["temperature"] = prompt.temperature
-            if prompt.max_tokens is not None:
-                body["max_tokens"] = prompt.max_tokens
 
-            metadata: dict[str, Any] = {"trace_id": prompt.trace_id}
-            metadata.update(prompt.metadata)
-            body["metadata"] = metadata
+            if is_embedding_request:
+                body = {
+                    "model": normalized_model,
+                    "input": _extract_prompt_input(prompt),
+                }
+                url = f"{base_url.rstrip('/')}/embeddings"
+            else:
+                body = {
+                    "model": normalized_model,
+                    "messages": [
+                        {"role": m.role, "content": m.content} for m in prompt.messages
+                    ],
+                }
+                if prompt.temperature is not None:
+                    body["temperature"] = prompt.temperature
+                if prompt.max_tokens is not None:
+                    body["max_tokens"] = prompt.max_tokens
 
-            url = f"{base_url.rstrip('/')}/chat/completions"
+                metadata: dict[str, Any] = {"trace_id": prompt.trace_id}
+                metadata.update(prompt.metadata)
+                body["metadata"] = metadata
+                url = f"{base_url.rstrip('/')}/chat/completions"
             try:
                 resp = await self._execute_with_retry(
                     method="POST", url=url, headers=headers, json_body=body
@@ -221,17 +391,42 @@ class PortkeyAdapter(GatewayProvider):
                     trace_id=prompt.trace_id,
                 )
 
-            content = data["choices"][0]["message"]["content"]
-            model = data.get("model", prompt.model)
+            model = data.get("model", normalized_model)
 
             usage: UsageInfo | None = None
             if "usage" in data:
                 u = data["usage"]
                 usage = UsageInfo(
-                    prompt_tokens=u["prompt_tokens"],
-                    completion_tokens=u["completion_tokens"],
-                    total_tokens=u["total_tokens"],
+                    prompt_tokens=int(u.get("prompt_tokens", 0)),
+                    completion_tokens=int(u.get("completion_tokens", 0)),
+                    total_tokens=int(u.get("total_tokens", u.get("prompt_tokens", 0))),
                 )
+
+            if is_embedding_request:
+                embedding_rows = data.get("data", [])
+                first_row = (
+                    embedding_rows[0]
+                    if isinstance(embedding_rows, list) and embedding_rows
+                    else {}
+                )
+                embedding = (
+                    first_row.get("embedding", [])
+                    if isinstance(first_row, dict)
+                    else []
+                )
+                dimensions = len(embedding) if isinstance(embedding, list) else 0
+                preview = embedding[:8] if isinstance(embedding, list) else []
+                content = json.dumps(
+                    {
+                        "message": "Embedding generated successfully",
+                        "model": model,
+                        "dimensions": dimensions,
+                        "embedding_preview": preview,
+                    },
+                    indent=2,
+                )
+            else:
+                content = data["choices"][0]["message"]["content"]
 
             # Check for guardrail hook_results in successful responses
             # (Portkey may include them even on 200 when guardrails pass)
@@ -257,7 +452,15 @@ class PortkeyAdapter(GatewayProvider):
         When DEMO_MODE=true, the adapter returns simulated responses
         instead of errors when no valid LLM API key is configured.
         """
-        return os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes")
+        env_value = os.environ.get("DEMO_MODE")
+        if env_value is not None:
+            return env_value.lower() in ("true", "1", "yes")
+        try:
+            from app.config import get_settings
+
+            return bool(get_settings().demo_mode)
+        except Exception:
+            return False
 
     @staticmethod
     def _demo_response(prompt: UnifiedPrompt) -> UnifiedResponse:
@@ -297,9 +500,22 @@ class PortkeyAdapter(GatewayProvider):
     async def create_guardrail(
         self, config: dict, api_key: str, base_url: str
     ) -> Union[dict, GatewayError]:
+        if self._is_demo_mode():
+            demo_id = f"demo-gr-{uuid.uuid4().hex[:8]}"
+            demo_name = str(config.get("name") or f"Demo Guardrail {len(_DEMO_GUARDRAILS) + 1}")
+            demo_item = {
+                "remote_id": demo_id,
+                "name": demo_name,
+                "config": config.get("checks") or config.get("config") or config,
+            }
+            _DEMO_GUARDRAILS.append(demo_item)
+            return {
+                "remote_id": demo_id,
+                "raw_response": {"id": demo_id, **demo_item, "demo": True},
+            }
         try:
             portkey_key, _ = _parse_api_key(api_key)
-            headers = self._build_headers(portkey_key)
+            headers = self._build_admin_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails"
             resp = await self._execute_with_retry(
                 method="POST", url=url, headers=headers, json_body=config
@@ -308,14 +524,6 @@ class PortkeyAdapter(GatewayProvider):
             remote_id = data.get("id") or data.get("slug") or data.get("_id")
             return {"remote_id": remote_id, "raw_response": data}
         except Exception as exc:
-            # Demo fallback: return simulated guardrail creation when
-            # DEMO_MODE is enabled and the real provider rejects the request.
-            if self._is_demo_mode():
-                demo_id = f"demo-gr-{uuid.uuid4().hex[:8]}"
-                return {
-                    "remote_id": demo_id,
-                    "raw_response": {"id": demo_id, "demo": True},
-                }
             return self._handle_error(exc, trace_id=str(uuid.uuid4()))
 
     async def update_guardrail(
@@ -323,7 +531,7 @@ class PortkeyAdapter(GatewayProvider):
     ) -> Union[dict, GatewayError]:
         try:
             portkey_key, _ = _parse_api_key(api_key)
-            headers = self._build_headers(portkey_key)
+            headers = self._build_admin_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails/{remote_id}"
             resp = await self._execute_with_retry(
                 method="PUT", url=url, headers=headers, json_body=config
@@ -344,7 +552,7 @@ class PortkeyAdapter(GatewayProvider):
     ) -> Union[bool, GatewayError]:
         try:
             portkey_key, _ = _parse_api_key(api_key)
-            headers = self._build_headers(portkey_key)
+            headers = self._build_admin_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails/{remote_id}"
             resp = await self._execute_with_retry(
                 method="DELETE", url=url, headers=headers
@@ -359,9 +567,11 @@ class PortkeyAdapter(GatewayProvider):
     async def list_guardrails(
         self, api_key: str, base_url: str
     ) -> Union[list[dict], GatewayError]:
+        if self._is_demo_mode():
+            return list(_DEMO_GUARDRAILS)
         try:
             portkey_key, _ = _parse_api_key(api_key)
-            headers = self._build_headers(portkey_key)
+            headers = self._build_admin_headers(portkey_key)
             url = f"{base_url.rstrip('/')}/guardrails"
             resp = await self._execute_with_retry(
                 method="GET", url=url, headers=headers
@@ -383,9 +593,223 @@ class PortkeyAdapter(GatewayProvider):
                 for item in items
             ]
         except Exception as exc:
-            # Demo fallback: return empty list of guardrails
-            if self._is_demo_mode():
-                return []
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    # Config CRUD (Portkey Configs API)
+    # ------------------------------------------------------------------
+
+    async def create_config(
+        self, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        if self._is_demo_mode():
+            name = str(config.get("name") or f"Demo Config {len(_DEMO_CONFIGS) + 1}")
+            slug_base = _slugify(name)
+            slug = slug_base
+            existing_slugs = {str(item.get("slug", "")) for item in _DEMO_CONFIGS}
+            suffix = 2
+            while slug in existing_slugs:
+                slug = f"{slug_base}-{suffix}"
+                suffix += 1
+
+            if int(config.get("isDefault") or 0) == 1:
+                for item in _DEMO_CONFIGS:
+                    item["is_default"] = 0
+
+            now_iso = _demo_now_iso()
+            demo_item = {
+                "id": f"demo-cfg-{uuid.uuid4().hex[:8]}",
+                "name": name,
+                "slug": slug,
+                "status": "active",
+                "is_default": int(config.get("isDefault") or 0),
+                "created_at": now_iso,
+                "last_updated_at": now_iso,
+                "config": config.get("config") or {},
+            }
+            _DEMO_CONFIGS.append(demo_item)
+            return {
+                "id": demo_item["id"],
+                "version_id": f"v-{uuid.uuid4().hex[:8]}",
+                "raw_response": {"success": True, "data": demo_item, "demo": True},
+            }
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/configs"
+            resp = await self._execute_with_retry(
+                method="POST", url=url, headers=headers, json_body=config
+            )
+            data = resp.json()
+            config_data = data.get("data", data)
+            return {
+                "id": config_data.get("id"),
+                "version_id": config_data.get("version_id"),
+                "raw_response": data,
+            }
+        except Exception as exc:
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    async def list_configs(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        if self._is_demo_mode():
+            return [
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "slug": item.get("slug", ""),
+                    "status": item.get("status", "active"),
+                    "is_default": item.get("is_default", 0),
+                    "created_at": item.get("created_at", ""),
+                    "last_updated_at": item.get("last_updated_at", ""),
+                }
+                for item in _DEMO_CONFIGS
+                if isinstance(item, dict)
+            ]
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/configs"
+            resp = await self._execute_with_retry(
+                method="GET", url=url, headers=headers
+            )
+            raw = resp.json()
+            if isinstance(raw, dict) and "data" in raw:
+                items = raw["data"]
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                items = []
+            return [
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "slug": item.get("slug", ""),
+                    "status": item.get("status", "active"),
+                    "is_default": item.get("is_default", 0),
+                    "created_at": item.get("created_at", ""),
+                    "last_updated_at": item.get("last_updated_at", ""),
+                }
+                for item in items
+                if isinstance(item, dict)
+            ]
+        except Exception as exc:
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    async def retrieve_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        if self._is_demo_mode():
+            for item in _DEMO_CONFIGS:
+                if item.get("slug") == slug:
+                    return dict(item)
+            return {"slug": slug, "status": "active", "config": {}}
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/configs/{slug}"
+            resp = await self._execute_with_retry(
+                method="GET", url=url, headers=headers
+            )
+            data = resp.json()
+            config_data = data.get("data", data)
+            return config_data
+        except Exception as exc:
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    async def update_config(
+        self, slug: str, config: dict, api_key: str, base_url: str
+    ) -> Union[dict, GatewayError]:
+        if self._is_demo_mode():
+            for item in _DEMO_CONFIGS:
+                if item.get("slug") == slug:
+                    if config.get("name") is not None:
+                        item["name"] = str(config["name"])
+                    if config.get("config") is not None:
+                        item["config"] = config["config"]
+                    if config.get("status") is not None:
+                        item["status"] = str(config["status"])
+                    item["last_updated_at"] = _demo_now_iso()
+                    return {
+                        "version_id": f"v-{uuid.uuid4().hex[:8]}",
+                        "raw_response": {"success": True, "data": item, "demo": True},
+                    }
+            return {
+                "version_id": f"v-{uuid.uuid4().hex[:8]}",
+                "raw_response": {"success": False, "demo": True, "slug": slug},
+            }
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/configs/{slug}"
+            resp = await self._execute_with_retry(
+                method="PUT", url=url, headers=headers, json_body=config
+            )
+            data = resp.json()
+            config_data = data.get("data", data)
+            return {
+                "version_id": config_data.get("version_id"),
+                "raw_response": data,
+            }
+        except Exception as exc:
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    async def delete_config(
+        self, slug: str, api_key: str, base_url: str
+    ) -> Union[bool, GatewayError]:
+        if self._is_demo_mode():
+            for index, item in enumerate(list(_DEMO_CONFIGS)):
+                if item.get("slug") == slug:
+                    _DEMO_CONFIGS.pop(index)
+                    return True
+            return True
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/configs/{slug}"
+            resp = await self._execute_with_retry(
+                method="DELETE", url=url, headers=headers
+            )
+            return resp.status_code in (200, 204)
+        except Exception as exc:
+            return self._handle_error(exc, trace_id=str(uuid.uuid4()))
+
+    # ------------------------------------------------------------------
+    # Integrations (LLM Integrations API)
+    # ------------------------------------------------------------------
+
+    async def list_integrations(
+        self, api_key: str, base_url: str
+    ) -> Union[list[dict], GatewayError]:
+        if self._is_demo_mode():
+            return list(_DEMO_INTEGRATIONS)
+        try:
+            portkey_key, _ = _parse_api_key(api_key)
+            headers = self._build_admin_headers(portkey_key)
+            url = f"{base_url.rstrip('/')}/integrations"
+            resp = await self._execute_with_retry(
+                method="GET", url=url, headers=headers
+            )
+            raw = resp.json()
+            if isinstance(raw, dict) and "data" in raw:
+                items = raw["data"]
+            elif isinstance(raw, list):
+                items = raw
+            else:
+                items = []
+            return [
+                {
+                    "id": item.get("id", ""),
+                    "name": item.get("name", ""),
+                    "slug": item.get("slug", ""),
+                    "ai_provider_id": item.get("ai_provider_id", ""),
+                    "status": item.get("status", "active"),
+                    "created_at": item.get("created_at", ""),
+                }
+                for item in items
+                if isinstance(item, dict)
+            ]
+        except Exception as exc:
             return self._handle_error(exc, trace_id=str(uuid.uuid4()))
 
     async def close(self) -> None:
@@ -405,24 +829,50 @@ class PortkeyAdapter(GatewayProvider):
     # ------------------------------------------------------------------
     # Internal methods
     # ------------------------------------------------------------------
+    @staticmethod
+    def _build_admin_headers(api_key: str) -> dict[str, str]:
+        """Build minimal headers for Portkey management/admin APIs.
+
+        Management endpoints (configs, guardrails, integrations) only need
+        the API key — no x-portkey-provider or virtual-key headers.
+
+        If PORTKEY_ADMIN_API_KEY is configured, it takes priority over the
+        provider's inference key, since management endpoints require a key
+        with admin scopes (configs.*, guardrails.*, integrations.*).
+        """
+        try:
+            from app.config import get_settings
+            admin_key = get_settings().portkey_admin_api_key
+            if admin_key:
+                api_key = admin_key
+        except Exception:
+            pass
+        return {
+            "x-portkey-api-key": api_key,
+            "Content-Type": "application/json",
+        }
+
     def _build_headers(
         self,
         api_key: str,
         llm_provider: str = "openai",
-        virtual_key: str | None = None,
+        virtual_keys: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Build the standard set of HTTP headers for the Portkey API.
 
-        If virtual_key is provided, uses x-portkey-virtual-key header
-        (Portkey routes to the correct provider via the virtual key config).
-        Otherwise, uses x-portkey-provider header for direct provider routing.
+        virtual_keys maps provider slugs to virtual-key slugs.
+        Picks the virtual key matching llm_provider, falls back to '_default'.
         """
         headers: dict[str, str] = {
             "x-portkey-api-key": api_key,
             "Content-Type": "application/json",
         }
-        if virtual_key:
-            headers["x-portkey-virtual-key"] = virtual_key
+        if virtual_keys:
+            vk = _get_virtual_key_for_provider(virtual_keys, llm_provider)
+            if vk:
+                headers["x-portkey-virtual-key"] = vk
+            else:
+                headers["x-portkey-provider"] = llm_provider
         else:
             headers["x-portkey-provider"] = llm_provider
         return headers
@@ -681,10 +1131,26 @@ class PortkeyAdapter(GatewayProvider):
             detail_suffix = f": {detail}" if detail else ""
 
             if status in (401, 403):
+                # Check if this is a management API call (AB03 = insufficient scopes)
+                resp_body = self._safe_json(exc.response)
+                error_code_str = ""
+                if isinstance(resp_body, dict):
+                    data = resp_body.get("data", {})
+                    if isinstance(data, dict):
+                        error_code_str = data.get("errorCode", "")
+                if error_code_str == "AB03":
+                    msg = (
+                        f"Portkey admin permission denied (HTTP {status}, AB03). "
+                        "Your API key lacks management scopes (configs.*, guardrails.*, integrations.*). "
+                        "Either set PORTKEY_ADMIN_API_KEY in .env with a key that has admin scopes, "
+                        "or update your existing key's permissions in the Portkey dashboard → Settings → API Keys."
+                    )
+                else:
+                    msg = f"Authentication failed (HTTP {status}) — check that the provider API key is valid and has sufficient permissions{detail_suffix}"
                 return GatewayError(
                     trace_id=_trace_id,
                     error_code=GatewayError.AUTH_FAILED,
-                    message=f"Authentication failed (HTTP {status}) — check that the provider API key is valid and has sufficient permissions{detail_suffix}",
+                    message=msg,
                     status_code=status,
                     provider_name="portkey",
                 )
@@ -697,6 +1163,18 @@ class PortkeyAdapter(GatewayProvider):
                     provider_name="portkey",
                 )
             if status in (400, 422):
+                normalized_detail = detail.strip().lower()
+                if "following keys are not valid" in normalized_detail and "null" in normalized_detail:
+                    return GatewayError(
+                        trace_id=_trace_id,
+                        error_code=GatewayError.AUTH_FAILED,
+                        message=(
+                            "OpenRouter is not configured for this Portkey provider — "
+                            "add a valid OpenRouter virtual key slug in Configuration > Providers."
+                        ),
+                        status_code=status,
+                        provider_name="portkey",
+                    )
                 return GatewayError(
                     trace_id=_trace_id,
                     error_code=GatewayError.VALIDATION_ERROR,

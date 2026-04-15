@@ -101,7 +101,7 @@ export default function SettingsPage() {
                                 <div>
                                     <p className="text-sm font-medium">Backend API</p>
                                     <p className="text-xs text-muted-foreground">
-                                        {process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"}
+                                        {process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:8000"}
                                     </p>
                                 </div>
                             </div>

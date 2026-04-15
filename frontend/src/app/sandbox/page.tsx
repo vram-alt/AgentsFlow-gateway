@@ -16,6 +16,7 @@ import {
     User,
     Copy,
     Check,
+    ChevronDown,
     Terminal,
     MessageSquare,
     Trash2,
@@ -36,6 +37,65 @@ interface ChatMessage {
     trace_id?: string;
     guardrail_blocked?: boolean;
     guardrail_details?: GuardrailDetails | null;
+}
+
+function getPrimaryProvider(providers: Provider[]): Provider | null {
+    return (
+        providers.find((provider) => provider.name.toLowerCase() === "portkey") ??
+        providers[0] ??
+        null
+    );
+}
+
+function getSuggestedProviderName(_model: string, providers: Provider[]): string | null {
+    return getPrimaryProvider(providers)?.name ?? null;
+}
+
+const PORTKEY_MODEL_GROUPS = [
+    {
+        label: "Google",
+        options: [
+            { value: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
+            { value: "gemini-2.5-flash-lite", label: "Gemini 2.5 Flash-Lite" },
+            { value: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
+        ],
+    },
+    {
+        label: "OpenAI",
+        options: [
+            { value: "gpt-4o", label: "GPT-4o" },
+            { value: "gpt-4.1", label: "GPT-4.1" },
+            { value: "gpt-4o-mini", label: "GPT-4o Mini" },
+            { value: "ada-v2", label: "Ada v2 (Embeddings)" },
+        ],
+    },
+    {
+        label: "Anthropic",
+        options: [
+            { value: "claude-sonnet-4-5-20250929", label: "Claude Sonnet 4.5" },
+            { value: "claude-3-7-sonnet-latest", label: "Claude 3.7 Sonnet" },
+            { value: "claude-haiku-4-5-20250929", label: "Claude Haiku 4.5" },
+        ],
+    },
+    {
+        label: "OpenRouter",
+        options: [
+            { value: "@openrouter/openai/gpt-4o", label: "OpenRouter · GPT-4o" },
+            { value: "@openrouter/anthropic/claude-3.5-sonnet", label: "OpenRouter · Claude 3.5 Sonnet" },
+            { value: "@openrouter/meta-llama/llama-3.1-8b-instruct", label: "OpenRouter · Llama 3.1 8B" },
+        ],
+    },
+] as const;
+
+function getModelLabel(selectedModel: string): string {
+    for (const group of PORTKEY_MODEL_GROUPS) {
+        const option = group.options.find((item) => item.value === selectedModel);
+        if (option) {
+            return option.label;
+        }
+    }
+
+    return selectedModel;
 }
 
 export default function SandboxPage() {
@@ -74,13 +134,16 @@ export default function SandboxPage() {
 function ChatTab() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
-    const [model, setModel] = useState("gemma-3-12b-it");
+    const [model, setModel] = useState("gemini-2.5-flash");
     const [provider, setProvider] = useState("portkey");
     const [temperature, setTemperature] = useState("0.7");
     const [maxTokens, setMaxTokens] = useState("1024");
     const [loading, setLoading] = useState(false);
     const [copied, setCopied] = useState<string | null>(null);
+    const [isModelMenuOpen, setIsModelMenuOpen] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const modelMenuRef = useRef<HTMLDivElement>(null);
+    const selectedModelLabel = getModelLabel(model);
 
     // Dynamic providers and policies
     const [providers, setProviders] = useState<Provider[]>([]);
@@ -89,16 +152,17 @@ function ChatTab() {
     const [guardrailMode, setGuardrailMode] = useState<"cloud" | "local">("cloud");
 
     useEffect(() => {
-        // Load active providers
         api.listProviders()
             .then((data) => {
                 const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
-                setProviders(active);
-                if (active.length > 0 && !active.find((p) => p.name === provider)) {
-                    setProvider(active[0].name);
-                }
+                const primaryProvider = getPrimaryProvider(active);
+                setProviders(primaryProvider ? [primaryProvider] : []);
+                setProvider(primaryProvider?.name ?? "portkey");
             })
-            .catch(() => setProviders([]));
+            .catch(() => {
+                setProviders([]);
+                setProvider("portkey");
+            });
 
         // Load all active policies (both cloud and local)
         api.listPolicies()
@@ -107,6 +171,9 @@ function ChatTab() {
                     (p) => p.is_active
                 );
                 setPolicies(active);
+                if (active.some((p) => !p.remote_id) && !active.some((p) => !!p.remote_id)) {
+                    setGuardrailMode("local");
+                }
             })
             .catch(() => setPolicies([]));
     }, []);
@@ -116,6 +183,17 @@ function ChatTab() {
             messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
         }
     }, [messages]);
+
+    useEffect(() => {
+        const handleClickOutside = (event: MouseEvent) => {
+            if (modelMenuRef.current && !modelMenuRef.current.contains(event.target as Node)) {
+                setIsModelMenuOpen(false);
+            }
+        };
+
+        document.addEventListener("mousedown", handleClickOutside);
+        return () => document.removeEventListener("mousedown", handleClickOutside);
+    }, []);
 
     const toggleGuardrail = (remoteId: string) => {
         setSelectedGuardrails((prev) =>
@@ -268,11 +346,11 @@ function ChatTab() {
                             <label className="text-sm text-muted-foreground">Provider</label>
                             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
                                 {providers.length === 0 && (
-                                    <option value="portkey">Portkey (default)</option>
+                                    <option value="portkey">Portkey</option>
                                 )}
                                 {providers.map((p) => (
                                     <option key={p.id} value={p.name}>
-                                        {p.name}
+                                        Portkey
                                     </option>
                                 ))}
                             </Select>
@@ -280,12 +358,63 @@ function ChatTab() {
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm text-muted-foreground">Model</label>
-                            <Input
-                                value={model}
-                                onChange={(e) => setModel(e.target.value)}
-                                placeholder="gemma-3-12b-it"
-                            />
+                            <div className="relative" ref={modelMenuRef}>
+                                <button
+                                    type="button"
+                                    onClick={() => setIsModelMenuOpen((open) => !open)}
+                                    className="flex w-full items-center justify-between rounded-xl border border-border/80 bg-input/90 px-3 py-2 text-left shadow-sm transition-all duration-200 hover:border-primary/40 hover:bg-secondary/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    aria-expanded={isModelMenuOpen}
+                                >
+                                    <div className="min-w-0 truncate text-sm font-medium text-foreground">
+                                        {selectedModelLabel}
+                                    </div>
+                                    <ChevronDown className={`ml-2 h-4 w-4 shrink-0 text-muted-foreground transition-transform ${isModelMenuOpen ? "rotate-180" : ""}`} />
+                                </button>
 
+                                {isModelMenuOpen && (
+                                    <div className="absolute z-30 mt-2 w-full rounded-xl border border-border/80 bg-card/95 p-2 shadow-2xl backdrop-blur">
+                                        <div className="max-h-72 overflow-y-auto pr-1">
+                                            {PORTKEY_MODEL_GROUPS.map((group) => (
+                                                <div key={group.label} className="mb-2 last:mb-0">
+                                                    <div className="sticky top-0 z-10 mb-1 rounded-md bg-card/95 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/90">
+                                                        {group.label}
+                                                    </div>
+                                                    <div className="space-y-1">
+                                                        {group.options.map((option) => {
+                                                            const isSelected = option.value === model;
+                                                            return (
+                                                                <button
+                                                                    key={option.value}
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setModel(option.value);
+                                                                        const suggestedProvider = getSuggestedProviderName(option.value, providers);
+                                                                        if (suggestedProvider) {
+                                                                            setProvider(suggestedProvider);
+                                                                        }
+                                                                        setIsModelMenuOpen(false);
+                                                                    }}
+                                                                    className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-left text-sm transition-colors ${isSelected
+                                                                        ? "bg-primary/15 text-primary ring-1 ring-primary/30"
+                                                                        : "text-foreground hover:bg-secondary"
+                                                                        }`}
+                                                                >
+                                                                    <span className="truncate">{option.label}</span>
+                                                                    {isSelected && (
+                                                                        <span className="ml-2 rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">
+                                                                            Selected
+                                                                        </span>
+                                                                    )}
+                                                                </button>
+                                                            );
+                                                        })}
+                                                    </div>
+                                                </div>
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
                         </div>
                         <div className="space-y-2">
                             <label className="text-sm text-muted-foreground">Temperature</label>
@@ -369,8 +498,8 @@ function ChatTab() {
 
                                     <p className="text-[10px] text-muted-foreground/70 leading-tight">
                                         {guardrailMode === "cloud"
-                                            ? "Cloud guardrails are enforced by Portkey — requests are validated before reaching the LLM."
-                                            : "Local policies are informational only — they are not enforced by Portkey Cloud."}
+                                            ? "Cloud guardrails are enforced by Portkey before the LLM call. If none are selected, all active cloud policies apply automatically."
+                                            : "Local policies are enforced by the gateway before the LLM call. If none are selected, all active local policies apply automatically."}
                                     </p>
 
                                     <Select
@@ -565,7 +694,7 @@ function ChatTab() {
                         </div>
                         <div className="flex items-start gap-2">
                             <Terminal className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                            <p><strong>Model</strong> — exact model name, e.g. <code className="bg-secondary px-1 rounded">gemma-3-12b-it</code></p>
+                            <p><strong>Model</strong> — choose a supported Portkey model such as <code className="bg-secondary px-1 rounded">gemini-2.5-flash</code> or <code className="bg-secondary px-1 rounded">@openrouter/openai/gpt-4o</code></p>
                         </div>
                     </div>
                     <div className="space-y-3">
@@ -604,7 +733,7 @@ function JsonTesterTab() {
     const [body, setBody] = useState(
         JSON.stringify(
             {
-                model: "gemma-3-12b-it",
+                model: "gemini-2.5-flash",
                 messages: [{ role: "user", content: "Hello!" }],
                 temperature: 0.7,
             },
@@ -621,12 +750,14 @@ function JsonTesterTab() {
         api.listProviders()
             .then((data) => {
                 const active = (Array.isArray(data) ? data : []).filter((p) => p.is_active);
-                setProviders(active);
-                if (active.length > 0 && !active.find((p) => p.name === provider)) {
-                    setProvider(active[0].name);
-                }
+                const primaryProvider = getPrimaryProvider(active);
+                setProviders(primaryProvider ? [primaryProvider] : []);
+                setProvider(primaryProvider?.name ?? "portkey");
             })
-            .catch(() => setProviders([]));
+            .catch(() => {
+                setProviders([]);
+                setProvider("portkey");
+            });
     }, []);
 
     const sendRequest = async () => {
@@ -684,11 +815,11 @@ function JsonTesterTab() {
                             <label className="text-xs text-muted-foreground">Provider</label>
                             <Select value={provider} onChange={(e) => setProvider(e.target.value)}>
                                 {providers.length === 0 && (
-                                    <option value="portkey">Portkey (default)</option>
+                                    <option value="portkey">Portkey</option>
                                 )}
                                 {providers.map((p) => (
                                     <option key={p.id} value={p.name}>
-                                        {p.name}
+                                        Portkey
                                     </option>
                                 ))}
                             </Select>
@@ -809,7 +940,7 @@ function JsonTesterTab() {
                     </div>
                     <div className="flex items-start gap-2">
                         <Play className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />
-                        <p><strong>Body:</strong> JSON payload sent to the provider. Must include "model" and "messages" for chat requests.</p>
+                        <p><strong>Body:</strong> JSON payload sent to the provider. Must include <code className="bg-secondary px-1 rounded">model</code> and <code className="bg-secondary px-1 rounded">messages</code> for chat requests.</p>
                     </div>
                     <div className="flex items-start gap-2">
                         <Info className="w-3.5 h-3.5 mt-0.5 shrink-0 text-primary/60" />

@@ -16,7 +16,7 @@ from app.domain.contracts.gateway_provider import GatewayProvider
 from app.domain.dto.gateway_error import GatewayError
 from app.domain.dto.unified_prompt import MessageItem, UnifiedPrompt
 from app.domain.dto.unified_response import UnifiedResponse
-from app.infrastructure.adapters.portkey_adapter import PortkeyAdapter
+from app.infrastructure.adapters.portkey_adapter import PortkeyAdapter, _DEMO_CONFIGS
 
 # --- Константы ---
 API_KEY = "pk-test-key-1234567890"
@@ -48,6 +48,21 @@ def _chat_body() -> dict:
             }
         ],
         "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+
+
+def _embedding_body() -> dict:
+    return {
+        "object": "list",
+        "data": [
+            {
+                "object": "embedding",
+                "index": 0,
+                "embedding": [0.123, 0.456, 0.789],
+            }
+        ],
+        "model": "text-embedding-ada-002",
+        "usage": {"prompt_tokens": 3, "total_tokens": 3},
     }
 
 
@@ -121,6 +136,23 @@ class TestSendPromptSuccess:
         assert "gpt-4" in s
         assert "Hi" in s
 
+    @pytest.mark.asyncio
+    async def test_ada_v2_uses_embeddings_endpoint_and_alias(self):
+        a = PortkeyAdapter()
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            m.return_value = _resp(200, _embedding_body())
+            r = await a.send_prompt(_prompt(model="ada-v2"), API_KEY, BASE_URL)
+
+        assert isinstance(r, UnifiedResponse)
+        assert r.model == "text-embedding-ada-002"
+        assert r.usage is not None
+        assert r.usage.prompt_tokens == 3
+        assert r.usage.completion_tokens == 0
+        assert r.usage.total_tokens == 3
+        call_repr = str(m.call_args)
+        assert "/embeddings" in call_repr
+        assert "text-embedding-ada-002" in call_repr
+
 
 # ===========================================================================
 # 3. Заголовки
@@ -133,6 +165,48 @@ class TestHeaders:
     def test_build_headers_has_content_type(self):
         h = PortkeyAdapter()._build_headers(API_KEY)
         assert h["Content-Type"] == "application/json"
+
+    def test_build_headers_uses_openrouter_virtual_key_when_provider_matches(self):
+        h = PortkeyAdapter()._build_headers(
+            API_KEY,
+            llm_provider="openrouter",
+            virtual_keys={"openrouter": "vk-openrouter"},
+        )
+        assert h["x-portkey-virtual-key"] == "vk-openrouter"
+        assert "x-portkey-provider" not in h
+
+    def test_build_headers_ignores_null_like_openrouter_key(self):
+        h = PortkeyAdapter()._build_headers(
+            API_KEY,
+            llm_provider="openrouter",
+            virtual_keys={"openrouter": "null"},
+        )
+        assert "x-portkey-virtual-key" not in h
+        assert h["x-portkey-provider"] == "openrouter"
+
+    @pytest.mark.asyncio
+    async def test_send_prompt_returns_clear_error_when_openrouter_key_missing(self):
+        a = PortkeyAdapter()
+        prompt = _prompt(model="@openrouter/openai/gpt-4o")
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            r = await a.send_prompt(prompt, "pk-test::google=dev-google,openai=dev-openai", BASE_URL)
+
+        assert isinstance(r, GatewayError)
+        assert r.error_code == GatewayError.AUTH_FAILED
+        assert "OpenRouter" in r.message
+        m.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_prompt_recognizes_openrouter_explicit_provider_alias(self):
+        a = PortkeyAdapter()
+        prompt = _prompt(model="@openrouter/openai/gpt-4o")
+        with patch.object(a, "_execute_with_retry", new_callable=AsyncMock) as m:
+            m.return_value = _resp(200, _chat_body())
+            await a.send_prompt(prompt, "pk-test::openrouter=vk-openrouter", BASE_URL)
+
+        call_repr = str(m.call_args)
+        assert "vk-openrouter" in call_repr
+        assert "x-portkey-provider" not in call_repr or "openrouter" in call_repr
 
     @pytest.mark.asyncio
     async def test_trace_id_in_call(self):
@@ -734,3 +808,36 @@ class TestLifecycle:
         client = a._get_http_client()
         assert isinstance(client, httpx.AsyncClient)
         await client.aclose()
+
+
+class TestDemoModeConfigCrud:
+    @pytest.mark.asyncio
+    async def test_list_configs_returns_demo_seed(self):
+        a = PortkeyAdapter()
+        with patch.object(a, "_is_demo_mode", return_value=True):
+            result = await a.list_configs(API_KEY, BASE_URL)
+        assert isinstance(result, list)
+        assert len(result) >= 1
+        assert any(item.get("slug") == "starter-demo-config" for item in result)
+
+    @pytest.mark.asyncio
+    async def test_create_config_persists_into_following_list_call(self):
+        a = PortkeyAdapter()
+        original = list(_DEMO_CONFIGS)
+        try:
+            with patch.object(a, "_is_demo_mode", return_value=True):
+                created = await a.create_config(
+                    {
+                        "name": "QA Visible Config",
+                        "config": {"cache": {"mode": "simple", "max_age": 30}},
+                    },
+                    API_KEY,
+                    BASE_URL,
+                )
+                listed = await a.list_configs(API_KEY, BASE_URL)
+            assert isinstance(created, dict)
+            assert any(item.get("id") == created.get("id") for item in listed)
+            assert any(item.get("slug") == "qa-visible-config" for item in listed)
+        finally:
+            _DEMO_CONFIGS.clear()
+            _DEMO_CONFIGS.extend(original)

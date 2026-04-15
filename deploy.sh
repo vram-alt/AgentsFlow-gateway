@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # ══════════════════════════════════════════════════════════════════════
-# AI Gateway — Deploy Script
+# AI Gateway — Local Dev Helper
 # ══════════════════════════════════════════════════════════════════════
-# Usage:
+# Production deployments are handled automatically by GitHub Actions
+# when code is merged to main. See .github/workflows/deploy.yml
+#
+# This script is for LOCAL DEVELOPMENT only:
 #   ./deploy.sh              — build and start all services
 #   ./deploy.sh build        — build images only
 #   ./deploy.sh up           — start services (assumes images exist)
 #   ./deploy.sh down         — stop all services
 #   ./deploy.sh logs         — tail logs from all services
 #   ./deploy.sh restart      — restart all services
+#   ./deploy.sh backup       — backup the database
 # ══════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -29,35 +33,14 @@ fi
 
 # ── Check .env exists ────────────────────────────────────────────────
 if [ ! -f .env ]; then
-    echo "⚠️  .env file not found. Copying from .env.production template..."
-    cp .env.production .env
-    echo "📝 Please edit .env with your production values before deploying!"
-    echo "   Required changes:"
-    echo "   - ADMIN_PASSWORD (change from default)"
-    echo "   - WEBHOOK_SECRET (change from default)"
-    echo "   - ENCRYPTION_KEY (generate new Fernet key)"
-    echo "   - NEXT_PUBLIC_API_URL (set to your server's public URL)"
-    echo "   - CORS_ORIGINS (set to your frontend's public URL)"
-    exit 1
-fi
-
-# ── Validate critical env vars ───────────────────────────────────────
-source .env 2>/dev/null || true
-
-if [[ "${ADMIN_PASSWORD:-}" == *"CHANGE_ME"* ]]; then
-    echo "❌ ADMIN_PASSWORD still contains default value. Please update .env"
-    exit 1
-fi
-
-if [[ "${WEBHOOK_SECRET:-}" == *"CHANGE_ME"* ]]; then
-    echo "❌ WEBHOOK_SECRET still contains default value. Please update .env"
-    exit 1
-fi
-
-if [[ "${ENCRYPTION_KEY:-}" == *"CHANGE_ME"* ]]; then
-    echo "❌ ENCRYPTION_KEY still contains default value. Please update .env"
-    echo "   Generate with: python -c \"from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())\""
-    exit 1
+    if [ -f .env.production ]; then
+        echo "⚠️  .env file not found. Copying from .env.production template..."
+        cp .env.production .env
+        echo "📝 Please edit .env with your values."
+    else
+        echo "❌ No .env or .env.production file found."
+        exit 1
+    fi
 fi
 
 # ── Commands ─────────────────────────────────────────────────────────
@@ -100,8 +83,14 @@ case "$ACTION" in
         echo "   Backend:  http://localhost:${BACKEND_PORT:-8000}"
         echo "   Health:   http://localhost:${BACKEND_PORT:-8000}/health"
         ;;
+    backup)
+        echo "💾 Backing up database..."
+        BACKUP_FILE="gateway_backup_$(date +%Y%m%d_%H%M%S).db"
+        docker cp ai-gateway-backend:/app/data/gateway.db "./${BACKUP_FILE}"
+        echo "✅ Database backed up to ${BACKUP_FILE}"
+        ;;
     *)
-        echo "Usage: $0 {build|up|down|logs|restart|deploy}"
+        echo "Usage: $0 {build|up|down|logs|restart|deploy|backup}"
         exit 1
         ;;
 esac

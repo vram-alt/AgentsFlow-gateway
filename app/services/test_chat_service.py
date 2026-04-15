@@ -35,6 +35,94 @@ SAMPLE_API_KEY = "sk-test-key-12345"
 SAMPLE_BASE_URL = "https://api.portkey.ai"
 SAMPLE_PROVIDER_NAME = "portkey"
 
+DETERMINISTIC_LOCAL_CHECK_CASES = [
+    pytest.param(
+        {"id": "default.sentenceCount", "parameters": {"minSentences": 1, "maxSentences": 3}},
+        {"request": {"text": "First sentence. Second sentence."}},
+        id="sentence-count",
+    ),
+    pytest.param(
+        {"id": "default.wordCount", "parameters": {"minWords": 2, "maxWords": 10}},
+        {"request": {"text": "three simple words"}},
+        id="word-count",
+    ),
+    pytest.param(
+        {"id": "default.characterCount", "parameters": {"minCharacters": 5, "maxCharacters": 30}},
+        {"request": {"text": "hello world"}},
+        id="character-count",
+    ),
+    pytest.param(
+        {"id": "default.uppercaseCheck", "parameters": {"not": False}},
+        {"request": {"text": "HELLO WORLD"}},
+        id="uppercase-check",
+    ),
+    pytest.param(
+        {"id": "default.lowercaseDetection", "parameters": {"format": "lowercase"}},
+        {"request": {"text": "hello world"}},
+        id="lowercase-check",
+    ),
+    pytest.param(
+        {"id": "default.endsWith", "parameters": {"Suffix": "."}},
+        {"request": {"text": "Ends with a dot."}},
+        id="ends-with",
+    ),
+    pytest.param(
+        {"id": "default.jsonSchema", "parameters": {"schema": {"type": "object", "required": ["key"], "properties": {"key": {"type": "string"}}}}},
+        {"request": {"text": '{"key": "value"}'}},
+        id="json-schema",
+    ),
+    pytest.param(
+        {"id": "default.jsonKeys", "parameters": {"keys": ["key1", "key2"], "operator": "all"}},
+        {"request": {"text": '{"key1": "value", "key2": 2}'}},
+        id="json-keys",
+    ),
+    pytest.param(
+        {"id": "default.validUrls", "parameters": {"onlyDNS": False}},
+        {"request": {"text": "Visit https://example.com/docs for more info."}},
+        id="valid-urls",
+    ),
+    pytest.param(
+        {"id": "default.containsCode", "parameters": {"format": "sql"}},
+        {"request": {"text": "SELECT * FROM users WHERE id = 1;"}},
+        id="contains-code",
+    ),
+    pytest.param(
+        {"id": "default.notNull", "parameters": {"not": False}},
+        {"request": {"text": "non-empty content"}},
+        id="not-null",
+    ),
+    pytest.param(
+        {"id": "default.contains", "parameters": {"words": ["blocked-word"], "operator": "any"}},
+        {"request": {"text": "This contains blocked-word in the prompt."}},
+        id="contains",
+    ),
+    pytest.param(
+        {"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": False}},
+        {"request": {"text": "hello", "json": {"model": "gpt-4o"}}},
+        id="model-whitelist",
+    ),
+    pytest.param(
+        {"id": "default.modelRules", "parameters": {"rules": {"tier": ["gpt-4o"]}, "not": False}},
+        {"request": {"text": "hello", "json": {"model": "gpt-4o"}}, "metadata": {"tier": "premium"}},
+        id="model-rules",
+    ),
+    pytest.param(
+        {"id": "default.allowedRequestTypes", "parameters": {"allowedTypes": ["chat"], "blockedTypes": []}},
+        {"request": {"text": "hello"}},
+        id="allowed-request-types",
+    ),
+    pytest.param(
+        {"id": "default.requiredMetadataKeys", "parameters": {"metadataKeys": ["user_id", "session_id"], "operator": "all"}},
+        {"request": {"text": "hello"}, "metadata": {"user_id": "u-1", "session_id": "s-1"}},
+        id="required-metadata-keys",
+    ),
+    pytest.param(
+        {"id": "default.requiredMetadataKeyValuePairs", "parameters": {"metadataPairs": {"environment": "production"}, "operator": "all"}},
+        {"request": {"text": "hello"}, "metadata": {"environment": "production"}},
+        id="required-metadata-kv",
+    ),
+]
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # Fixtures
@@ -64,6 +152,14 @@ def mock_log_service():
 
 
 @pytest.fixture
+def mock_policy_repo():
+    """Mock PolicyRepository with async methods."""
+    repo = AsyncMock()
+    repo.list_all = AsyncMock(return_value=[])
+    return repo
+
+
+@pytest.fixture
 def mock_adapter():
     """Мок GatewayProvider (адаптер) с async-методами."""
     adapter = AsyncMock()
@@ -81,10 +177,11 @@ def mock_adapter():
 
 
 @pytest.fixture
-def service(mock_provider_repo, mock_log_service, mock_adapter):
+def service(mock_provider_repo, mock_policy_repo, mock_log_service, mock_adapter):
     """Instance of ChatService with mocked dependencies."""
     return ChatService(
         provider_repo=mock_provider_repo,
+        policy_repo=mock_policy_repo,
         log_service=mock_log_service,
         adapter=mock_adapter,
     )
@@ -312,6 +409,64 @@ class TestSendChatMessageHappyPath:
         assert prompt_arg.guardrail_ids == []
 
     @pytest.mark.asyncio
+    async def test_active_cloud_guardrails_auto_apply_when_none_selected(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """Active cloud guardrails should be applied by default even when the UI sends none."""
+        active_cloud_policy = MagicMock(
+            id=11,
+            name="Cloud block",
+            remote_id="gr-cloud-001",
+            body={"deny": True},
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [active_cloud_policy]
+
+        await service.send_chat_message(
+            model=SAMPLE_MODEL,
+            messages=SAMPLE_MESSAGES,
+        )
+
+        prompt_arg = mock_adapter.send_prompt.call_args[0][0]
+        assert prompt_arg.guardrail_ids == ["gr-cloud-001"]
+
+    @pytest.mark.asyncio
+    async def test_active_local_guardrail_can_block_before_llm_call(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """Active local webhook/regex-style policies should block in the gateway before the LLM call."""
+        local_policy = MagicMock(
+            id=21,
+            name="Block blocked-word",
+            remote_id=None,
+            body={
+                "checks": [
+                    {
+                        "id": "default.regexMatch",
+                        "parameters": {
+                            "rule": "blocked-word",
+                            "not": True,
+                        },
+                    }
+                ],
+                "actions": {"onFail": "block", "onPass": "allow"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        result = await service.send_chat_message(
+            model=SAMPLE_MODEL,
+            messages=[{"role": "user", "content": "This contains blocked-word."}],
+        )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is True
+        assert "Block blocked-word" in result.content
+        mock_adapter.send_prompt.assert_not_awaited()
+
+    @pytest.mark.asyncio
     async def test_prompt_temperature_none_by_default(self, service, mock_adapter):
         """temperature defaults to None."""
         await service.send_chat_message(
@@ -387,6 +542,545 @@ class TestSendChatMessageHappyPath:
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Провайдер не найден / деактивирован (specification §4, AUTH_FAILED)
 # ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestDeterministicLocalGuardrails:
+    """Deterministic Portkey BASIC guardrails should evaluate correctly in local mode."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(("check", "request_payload"), DETERMINISTIC_LOCAL_CHECK_CASES)
+    async def test_each_new_deterministic_check_can_pass_locally(
+        self, service, check, request_payload
+    ):
+        """Each newly added deterministic check should produce a passing local verdict for valid input."""
+        result = await service._evaluate_local_check(check, request_payload)
+
+        assert result["id"] == check["id"]
+        assert result["verdict"] is True
+        assert isinstance(result["explanation"], str)
+        assert result["explanation"]
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Deep audit: edge-case tests for every local evaluator
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+class TestModelWhitelistCaseInsensitive:
+    """Model whitelist must match case-insensitively."""
+
+    @pytest.mark.asyncio
+    async def test_model_matches_different_casing(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": ["gemini-2.5-flash"], "Inverse": False}}
+        payload = {"request": {"text": "", "json": {"model": "Gemini-2.5-Flash"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_model_matches_uppercase(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": False}}
+        payload = {"request": {"text": "", "json": {"model": "GPT-4O"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_model_not_in_whitelist_blocks(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": False}}
+        payload = {"request": {"text": "", "json": {"model": "claude-3"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_inverse_whitelist_blocks_listed_model(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": True}}
+        payload = {"request": {"text": "", "json": {"model": "gpt-4o"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_inverse_whitelist_allows_unlisted_model(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": True}}
+        payload = {"request": {"text": "", "json": {"model": "claude-3"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_empty_models_list_blocks_any_model(self, service):
+        check = {"id": "default.modelWhitelist", "parameters": {"Models": [], "Inverse": False}}
+        payload = {"request": {"text": "", "json": {"model": "gpt-4o"}}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestModelRulesCaseInsensitive:
+    """Model rules must compare model names case-insensitively."""
+
+    @pytest.mark.asyncio
+    async def test_rules_match_different_casing(self, service):
+        check = {"id": "default.modelRules", "parameters": {"rules": {"tier": ["gpt-4o"]}, "not": False}}
+        payload = {"request": {"text": "", "json": {"model": "GPT-4O"}}, "metadata": {"tier": "premium"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_rules_reject_unlisted_model(self, service):
+        check = {"id": "default.modelRules", "parameters": {"rules": {"tier": ["gpt-4o"]}, "not": False}}
+        payload = {"request": {"text": "", "json": {"model": "claude-3"}}, "metadata": {"tier": "premium"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestLowercaseCheckInversion:
+    """Lowercase check should support 'not' parameter inversion like uppercase."""
+
+    @pytest.mark.asyncio
+    async def test_lowercase_pass(self, service):
+        check = {"id": "default.lowercaseDetection", "parameters": {}}
+        payload = {"request": {"text": "all lowercase text"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_lowercase_fail_for_uppercase(self, service):
+        check = {"id": "default.lowercaseDetection", "parameters": {}}
+        payload = {"request": {"text": "NOT lowercase"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_lowercase_inverted_pass(self, service):
+        check = {"id": "default.lowercaseDetection", "parameters": {"not": True}}
+        payload = {"request": {"text": "NOT lowercase"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_lowercase_inverted_fail(self, service):
+        check = {"id": "default.lowercaseDetection", "parameters": {"not": True}}
+        payload = {"request": {"text": "all lowercase text"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestRangeCheckSafeParsing:
+    """Range-based checks must not crash on non-numeric parameter values."""
+
+    @pytest.mark.asyncio
+    async def test_sentence_count_non_numeric_param(self, service):
+        check = {"id": "default.sentenceCount", "parameters": {"minSentences": "abc", "maxSentences": "xyz"}}
+        payload = {"request": {"text": "One sentence."}}
+        result = await service._evaluate_local_check(check, payload)
+        assert isinstance(result["verdict"], bool)
+        assert "explanation" in result
+
+    @pytest.mark.asyncio
+    async def test_word_count_non_numeric_param(self, service):
+        check = {"id": "default.wordCount", "parameters": {"minWords": "abc"}}
+        payload = {"request": {"text": "some words"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert isinstance(result["verdict"], bool)
+
+    @pytest.mark.asyncio
+    async def test_character_count_non_numeric_param(self, service):
+        check = {"id": "default.characterCount", "parameters": {"minCharacters": "bad"}}
+        payload = {"request": {"text": "text"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert isinstance(result["verdict"], bool)
+
+
+class TestSentenceCountEdgeCases:
+    """Sentence count edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_text(self, service):
+        check = {"id": "default.sentenceCount", "parameters": {"minSentences": 1}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_exceeds_max(self, service):
+        check = {"id": "default.sentenceCount", "parameters": {"maxSentences": 1}}
+        payload = {"request": {"text": "First. Second. Third."}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestWordCountEdgeCases:
+    """Word count edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_text(self, service):
+        check = {"id": "default.wordCount", "parameters": {"minWords": 1}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_exceeds_max(self, service):
+        check = {"id": "default.wordCount", "parameters": {"maxWords": 2}}
+        payload = {"request": {"text": "too many words here"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestCharacterCountEdgeCases:
+    """Character count edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_text_below_min(self, service):
+        check = {"id": "default.characterCount", "parameters": {"minCharacters": 1}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_exceeds_max(self, service):
+        check = {"id": "default.characterCount", "parameters": {"maxCharacters": 3}}
+        payload = {"request": {"text": "toolong"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestUppercaseEdgeCases:
+    """Uppercase check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_mixed_case_fails(self, service):
+        check = {"id": "default.uppercaseCheck", "parameters": {}}
+        payload = {"request": {"text": "Hello"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_inverted_mixed_case_passes(self, service):
+        check = {"id": "default.uppercaseCheck", "parameters": {"not": True}}
+        payload = {"request": {"text": "Hello"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_empty_text_fails(self, service):
+        check = {"id": "default.uppercaseCheck", "parameters": {}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestEndsWithEdgeCases:
+    """EndsWith check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_missing_suffix_fails(self, service):
+        check = {"id": "default.endsWith", "parameters": {}}
+        payload = {"request": {"text": "hello."}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_wrong_suffix_fails(self, service):
+        check = {"id": "default.endsWith", "parameters": {"Suffix": "!"}}
+        payload = {"request": {"text": "hello."}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_trailing_whitespace_handled(self, service):
+        check = {"id": "default.endsWith", "parameters": {"Suffix": "."}}
+        payload = {"request": {"text": "hello.   "}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+
+class TestJsonSchemaEdgeCases:
+    """JSON Schema check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_non_json_text_fails(self, service):
+        check = {"id": "default.jsonSchema", "parameters": {"schema": {"type": "object"}}}
+        payload = {"request": {"text": "not json"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_missing_required_key(self, service):
+        check = {"id": "default.jsonSchema", "parameters": {"schema": {"type": "object", "required": ["missing_key"]}}}
+        payload = {"request": {"text": '{"other": 1}'}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_missing_schema_param(self, service):
+        check = {"id": "default.jsonSchema", "parameters": {}}
+        payload = {"request": {"text": '{"key": 1}'}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestJsonKeysEdgeCases:
+    """JSON Keys check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_operator_none_passes_when_no_keys_present(self, service):
+        check = {"id": "default.jsonKeys", "parameters": {"keys": ["secret"], "operator": "none"}}
+        payload = {"request": {"text": '{"public": 1}'}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_operator_any_passes_with_one_match(self, service):
+        check = {"id": "default.jsonKeys", "parameters": {"keys": ["a", "b"], "operator": "any"}}
+        payload = {"request": {"text": '{"a": 1}'}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_operator_all_fails_when_missing_key(self, service):
+        check = {"id": "default.jsonKeys", "parameters": {"keys": ["a", "b"], "operator": "all"}}
+        payload = {"request": {"text": '{"a": 1}'}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestContainsCheckEdgeCases:
+    """Contains check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_operator_none_passes_when_no_words_found(self, service):
+        check = {"id": "default.contains", "parameters": {"words": ["forbidden"], "operator": "none"}}
+        payload = {"request": {"text": "clean text"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_operator_none_fails_when_word_found(self, service):
+        check = {"id": "default.contains", "parameters": {"words": ["clean"], "operator": "none"}}
+        payload = {"request": {"text": "clean text"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_operator_all_fails_when_partial(self, service):
+        check = {"id": "default.contains", "parameters": {"words": ["hello", "world"], "operator": "all"}}
+        payload = {"request": {"text": "hello there"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestNotNullEdgeCases:
+    """NotNull check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_string_fails(self, service):
+        check = {"id": "default.notNull", "parameters": {}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_whitespace_only_fails(self, service):
+        check = {"id": "default.notNull", "parameters": {}}
+        payload = {"request": {"text": "   "}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_inverted_empty_passes(self, service):
+        check = {"id": "default.notNull", "parameters": {"not": True}}
+        payload = {"request": {"text": ""}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+
+class TestContainsCodeEdgeCases:
+    """ContainsCode check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_python_detected(self, service):
+        check = {"id": "default.containsCode", "parameters": {"format": "python"}}
+        payload = {"request": {"text": "def hello():\n    pass"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_plain_text_no_code(self, service):
+        check = {"id": "default.containsCode", "parameters": {"format": "python"}}
+        payload = {"request": {"text": "just a normal sentence"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestValidUrlsEdgeCases:
+    """ValidUrls check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_no_urls_passes(self, service):
+        check = {"id": "default.validUrls", "parameters": {}}
+        payload = {"request": {"text": "No URLs here."}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_valid_url_passes(self, service):
+        check = {"id": "default.validUrls", "parameters": {}}
+        payload = {"request": {"text": "Go to https://example.com"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+
+class TestAllowedRequestTypesEdgeCases:
+    """AllowedRequestTypes check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_chat_blocked(self, service):
+        check = {"id": "default.allowedRequestTypes", "parameters": {"blockedTypes": ["chat"]}}
+        payload = {"request": {"text": "hello"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_chat_not_in_allowed_fails(self, service):
+        check = {"id": "default.allowedRequestTypes", "parameters": {"allowedTypes": ["embedding"]}}
+        payload = {"request": {"text": "hello"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestRegexCheckEdgeCases:
+    """Regex check edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_regex_match_passes(self, service):
+        check = {"id": "default.regexMatch", "parameters": {"rule": r"\d{3}-\d{4}"}}
+        payload = {"request": {"text": "Call 555-1234"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+
+    @pytest.mark.asyncio
+    async def test_regex_no_match_fails(self, service):
+        check = {"id": "default.regexMatch", "parameters": {"rule": r"\d{3}-\d{4}"}}
+        payload = {"request": {"text": "No phone number"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_regex_inverted_blocks_match(self, service):
+        check = {"id": "default.regexMatch", "parameters": {"rule": "badword", "not": True}}
+        payload = {"request": {"text": "contains badword"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_regex_invalid_pattern(self, service):
+        check = {"id": "default.regexMatch", "parameters": {"rule": "[invalid"}}
+        payload = {"request": {"text": "test"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+    @pytest.mark.asyncio
+    async def test_regex_missing_rule(self, service):
+        check = {"id": "default.regexMatch", "parameters": {}}
+        payload = {"request": {"text": "test"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is False
+
+
+class TestUnsupportedCheckSkipped:
+    """Unsupported check types should be skipped with verdict=True."""
+
+    @pytest.mark.asyncio
+    async def test_unknown_check_passes(self, service):
+        check = {"id": "custom.unknownCheck", "parameters": {}}
+        payload = {"request": {"text": "test"}}
+        result = await service._evaluate_local_check(check, payload)
+        assert result["verdict"] is True
+        assert "Unsupported" in result["explanation"]
+
+
+class TestPolicyBlockingE2E:
+    """End-to-end: a failing local policy with deny=True blocks the request."""
+
+    @pytest.mark.asyncio
+    async def test_model_not_in_whitelist_blocks_request(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """A model NOT in the whitelist should block the request entirely."""
+        local_policy = MagicMock(
+            id=99,
+            name="Model gate",
+            remote_id=None,
+            body={
+                "checks": [{"id": "default.modelWhitelist", "parameters": {"Models": ["gpt-4o"], "Inverse": False}}],
+                "actions": {"onFail": "block"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        result = await service.send_chat_message(
+            model="claude-3",
+            messages=[{"role": "user", "content": "hi"}],
+        )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is True
+        assert "Model gate" in result.content
+        mock_adapter.send_prompt.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_model_in_whitelist_allows_request(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """A model IN the whitelist should allow the request through."""
+        local_policy = MagicMock(
+            id=100,
+            name="Model gate",
+            remote_id=None,
+            body={
+                "checks": [{"id": "default.modelWhitelist", "parameters": {"Models": ["gemini-2.5-flash", "gpt-4o"], "Inverse": False}}],
+                "actions": {"onFail": "block", "onPass": "allow"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        result = await service.send_chat_message(
+            model="gemini-2.5-flash",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is not True
+        mock_adapter.send_prompt.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_model_whitelist_case_insensitive_e2e(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """Model whitelist match must be case-insensitive end-to-end."""
+        local_policy = MagicMock(
+            id=101,
+            name="Model gate CI",
+            remote_id=None,
+            body={
+                "checks": [{"id": "default.modelWhitelist", "parameters": {"Models": ["gemini-2.5-flash"], "Inverse": False}}],
+                "actions": {"onFail": "block"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        result = await service.send_chat_message(
+            model="GEMINI-2.5-FLASH",
+            messages=[{"role": "user", "content": "hello"}],
+        )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is not True
+        mock_adapter.send_prompt.assert_awaited_once()
 
 
 class TestSendChatMessageProviderNotFound:

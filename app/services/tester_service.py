@@ -53,7 +53,15 @@ class TesterService:
     @staticmethod
     def _is_demo_mode() -> bool:
         """Check if demo mode is enabled via DEMO_MODE environment variable."""
-        return os.environ.get("DEMO_MODE", "").lower() in ("true", "1", "yes")
+        env_value = os.environ.get("DEMO_MODE")
+        if env_value is not None:
+            return env_value.lower() in ("true", "1", "yes")
+        try:
+            from app.config import get_settings
+
+            return bool(get_settings().demo_mode)
+        except Exception:
+            return False
 
     @staticmethod
     def _demo_proxy_response(
@@ -168,7 +176,7 @@ class TesterService:
         base_url: str = provider.base_url
 
         # Parse api_key: support "portkey_key::virtual_key" format
-        api_key, virtual_key = _parse_api_key(raw_api_key)
+        api_key, virtual_keys = _parse_api_key(raw_api_key)
 
         # §1.2 step 3: Build URL
         url = f"{base_url.rstrip('/')}/{path.lstrip('/')}"
@@ -191,11 +199,19 @@ class TesterService:
             "x-portkey-api-key": api_key,
             "Content-Type": "application/json",
         }
-        # Use virtual key if available, otherwise use x-portkey-provider
-        if virtual_key:
-            request_headers["x-portkey-virtual-key"] = virtual_key
+        # Infer LLM provider from model in body
+        llm_provider = "openai"
+        if body and isinstance(body.get("model"), str):
+            llm_provider = _infer_provider_from_model(body["model"])
+        # Route to matching virtual key, or fall back to x-portkey-provider
+        if virtual_keys:
+            vk = virtual_keys.get(llm_provider) or virtual_keys.get("_default")
+            if vk:
+                request_headers["x-portkey-virtual-key"] = vk
+            else:
+                request_headers["x-portkey-provider"] = llm_provider
         else:
-            request_headers["x-portkey-provider"] = "openai"
+            request_headers["x-portkey-provider"] = llm_provider
 
         if headers is not None:
             for key, value in headers.items():
@@ -203,12 +219,6 @@ class TesterService:
                 if key.lower() == "x-portkey-api-key":
                     continue
                 request_headers[key] = value
-
-        # Infer x-portkey-provider from model in body if available (only when no virtual key)
-        if not virtual_key and body and isinstance(body.get("model"), str):
-            request_headers["x-portkey-provider"] = _infer_provider_from_model(
-                body["model"]
-            )
 
         # §1.2 step 6: Time measurement
         start_time = time.monotonic()

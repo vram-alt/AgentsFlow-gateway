@@ -1,11 +1,15 @@
 /**
- * Centralized API client for AI Gateway backend (http://localhost:8000).
- * All 22 endpoints covered.
+ * Centralized API client for AI Gateway backend.
+ * Uses same-origin `/api` requests in the browser to avoid CORS issues.
  */
 
 import { getStoredAuthToken } from "@/lib/auth-context";
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const SERVER_API_BASE =
+    process.env.INTERNAL_API_URL ||
+    process.env.NEXT_PUBLIC_API_URL ||
+    "http://localhost:8000";
+const API_BASE = typeof window === "undefined" ? SERVER_API_BASE : "";
 
 // ─── Auth header (HTTP Basic Auth) ──────────────────────────────────────
 function getHeaders(): HeadersInit {
@@ -285,6 +289,51 @@ export interface TesterFormSchema {
     }>;
 }
 
+// ─── Config Types ───────────────────────────────────────────────────────
+
+export interface PortkeyConfig {
+    id: string;
+    name: string;
+    slug: string;
+    status: string;
+    is_default: number;
+    created_at: string;
+    last_updated_at: string;
+}
+
+export interface PortkeyConfigDetail {
+    config: Record<string, unknown>;
+    [key: string]: unknown;
+}
+
+export interface ConfigCreateRequest {
+    name: string;
+    config: Record<string, unknown>;
+    is_default?: number;
+    provider_name?: string;
+}
+
+export interface ConfigUpdateRequest {
+    name?: string | null;
+    config?: Record<string, unknown> | null;
+    status?: string | null;
+}
+
+export interface PortkeyIntegration {
+    id: string;
+    name: string;
+    slug: string;
+    ai_provider_id: string;
+    status: string;
+    created_at: string;
+}
+
+export interface PortkeyGuardrail {
+    remote_id: string;
+    name: string;
+    config: Record<string, unknown>;
+}
+
 // ─── API Methods ────────────────────────────────────────────────────────
 
 // Health
@@ -300,9 +349,9 @@ export const api = {
         }),
 
     // Providers
-    listProviders: () => apiFetch<Provider[]>("/api/providers/"),
+    listProviders: () => apiFetch<Provider[]>("/api/providers"),
     createProvider: (data: ProviderCreateRequest) =>
-        apiFetch<Provider>("/api/providers/", {
+        apiFetch<Provider>("/api/providers", {
             method: "POST",
             body: JSON.stringify(data),
         }),
@@ -323,9 +372,9 @@ export const api = {
         apiFetch<ProviderHealth[]>("/api/providers/health"),
 
     // Policies
-    listPolicies: () => apiFetch<Policy[]>("/api/policies/"),
+    listPolicies: () => apiFetch<Policy[]>("/api/policies"),
     createPolicy: (data: PolicyCreateRequest) =>
-        apiFetch<Policy>("/api/policies/", {
+        apiFetch<Policy>("/api/policies", {
             method: "POST",
             body: JSON.stringify(data),
         }),
@@ -361,7 +410,7 @@ export const api = {
         if (params?.event_type) searchParams.set("event_type", params.event_type);
         if (params?.trace_id) searchParams.set("trace_id", params.trace_id);
         const qs = searchParams.toString();
-        return apiFetch<LogEntry[]>(`/api/logs/${qs ? `?${qs}` : ""}`);
+        return apiFetch<LogEntry[]>(`/api/logs${qs ? `?${qs}` : ""}`);
     },
     getLogStats: () => apiFetch<LogStats>("/api/logs/stats"),
     getLogsByTraceId: (traceId: string) =>
@@ -427,4 +476,31 @@ export const api = {
             method: "PUT",
             body: JSON.stringify({ enabled }),
         }),
+
+    // Configs (Portkey)
+    listConfigs: () => apiFetch<PortkeyConfig[]>("/api/configs/"),
+    createConfig: (data: ConfigCreateRequest) =>
+        apiFetch<{ id: string; version_id: string }>("/api/configs/", {
+            method: "POST",
+            body: JSON.stringify(data),
+        }),
+    retrieveConfig: (slug: string) =>
+        apiFetch<PortkeyConfigDetail>(`/api/configs/${slug}`),
+    updateConfig: (slug: string, data: ConfigUpdateRequest) =>
+        apiFetch<{ version_id: string }>(`/api/configs/${slug}`, {
+            method: "PUT",
+            body: JSON.stringify(data),
+        }),
+    deleteConfig: (slug: string) =>
+        apiFetch<{ status: string }>(`/api/configs/${slug}`, {
+            method: "DELETE",
+        }),
+    toggleConfig: (slug: string) =>
+        apiFetch<unknown>(`/api/configs/${slug}/toggle`, {
+            method: "PATCH",
+        }),
+    listConfigGuardrails: () =>
+        apiFetch<PortkeyGuardrail[]>("/api/configs/guardrails"),
+    listIntegrations: () =>
+        apiFetch<PortkeyIntegration[]>("/api/configs/integrations"),
 };

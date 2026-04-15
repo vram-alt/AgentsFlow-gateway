@@ -1,0 +1,54 @@
+name: Deploy to EC2
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: Build & Deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to EC2 via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: 13.223.77.71
+          username: ubuntu
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            set -e
+            cd /home/ubuntu/ai-gateway-poc
+
+            echo "=== Pulling latest code ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            echo "=== Building and deploying ==="
+            docker compose build
+            docker compose up -d
+
+            echo "=== Waiting for health check ==="
+            for i in $(seq 1 30); do
+              if curl -sf http://localhost:8000/health > /dev/null 2>&1; then
+                echo "✅ Backend is healthy"
+                break
+              fi
+              if [ "$i" -eq 30 ]; then
+                echo "❌ Health check failed after 30 attempts"
+                docker compose logs --tail=50 backend
+                exit 1
+              fi
+              sleep 2
+            done
+
+            echo "=== Cleaning up old images ==="
+            docker image prune -f
+
+            echo "✅ Deployment complete"

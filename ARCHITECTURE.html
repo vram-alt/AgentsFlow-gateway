@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AgentsFlow Gateway Architecture</title>
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      securityLevel: 'loose'
+    });
+  </script>
+  <style>
+    body {
+      margin: 0;
+      padding: 24px;
+      font-family: Inter, Arial, sans-serif;
+      background: #0b1120;
+      color: #f8fafc;
+    }
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      background: #111827;
+      border: 1px solid #1e293b;
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.35);
+    }
+    h1 {
+      margin: 0 0 16px;
+      font-size: 28px;
+    }
+    .hint {
+      margin-bottom: 20px;
+      color: #94a3b8;
+      font-size: 14px;
+    }
+    .mermaid {
+      overflow: auto;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>AgentsFlow Gateway Architecture</h1>
+    <div class="hint">Open this file in a browser or VS Code preview to see the rendered diagram.</div>
+
+    <div class="mermaid">
+flowchart LR
+    U[User / Admin] --> FE[Next.js Frontend<br/>Sandbox / Providers / Policies / Logs]
+
+    subgraph AWS[Docker Deployment on AWS/EC2]
+        FE --> API[FastAPI Backend<br/>app/main.py]
+
+        subgraph Backend[Clean Architecture Layers]
+            API --> R[API Routes & Middleware<br/>chat / providers / policies / logs / stats / tester]
+            R --> S[Services Layer<br/>ChatService<br/>ProviderService<br/>PolicyService<br/>LogService<br/>TesterService<br/>WebhookService]
+            S --> D[Domain Layer<br/>DTOs / Entities / Contracts]
+            S --> A[Infrastructure Adapters<br/>PortkeyAdapter]
+            S --> REPO[Database Repositories]
+        end
+
+        REPO --> DB[(SQLite DB<br/>/app/data/gateway.db)]
+        MIG[Alembic Migrations<br/>docker-entrypoint.sh] --> DB
+        CFG[.env / app/config.py] --> API
+    end
+
+    A --> PK[Portkey Gateway]
+    PK --> OA[OpenAI]
+    PK --> GG[Google Gemini]
+    PK --> AN[Anthropic]
+    PK --> OR[OpenRouter]
+    </div>
+  </div>
+</body>
+</html>
