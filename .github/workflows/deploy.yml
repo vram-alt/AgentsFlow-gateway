@@ -42,27 +42,13 @@ jobs:
             echo "=== Ensuring .env exists ==="
             if [ ! -f .env ]; then
               cp .env.example .env
-              python3 - <<'PY'
-              from base64 import urlsafe_b64encode
-              from pathlib import Path
-              import os
-              import secrets
-
-              env_path = Path('.env')
-              content = env_path.read_text()
-
-              replacements = {
-                  'WEBHOOK_SECRET=CHANGE_ME_webhook_secret_min16chars': f'WEBHOOK_SECRET={secrets.token_urlsafe(24)}',
-                  'ENCRYPTION_KEY=CHANGE_ME_generate_new_fernet_key_44chars': f'ENCRYPTION_KEY={urlsafe_b64encode(os.urandom(32)).decode()}',
-                  'CORS_ORIGINS=http://localhost:3000': 'CORS_ORIGINS=http://13.223.77.71:3000',
-                  'NEXT_PUBLIC_API_URL=http://127.0.0.1:8000': 'NEXT_PUBLIC_API_URL=http://13.223.77.71:8000',
-              }
-
-              for old, new in replacements.items():
-                  content = content.replace(old, new)
-
-              env_path.write_text(content)
-              PY
+              WEBHOOK_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
+              ENCRYPTION_KEY=$(python3 -c "from base64 import urlsafe_b64encode; import os; print(urlsafe_b64encode(os.urandom(32)).decode())")
+              sed -i "s|WEBHOOK_SECRET=CHANGE_ME_webhook_secret_min16chars|WEBHOOK_SECRET=${WEBHOOK_SECRET}|" .env
+              sed -i "s|ENCRYPTION_KEY=CHANGE_ME_generate_new_fernet_key_44chars|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env
+              sed -i "s|CORS_ORIGINS=http://localhost:3000|CORS_ORIGINS=http://${PUBLIC_HOST}:3000|" .env
+              sed -i "s|NEXT_PUBLIC_API_URL=http://127.0.0.1:8000|NEXT_PUBLIC_API_URL=http://${PUBLIC_HOST}:8000|" .env
+              echo "Generated .env from template"
             fi
 
             echo "=== Building and deploying ==="
