@@ -40,7 +40,7 @@ jobs:
             git reset --hard origin/main
 
             echo "=== Ensuring .env exists ==="
-            if [ ! -f .env ] || grep -q "CHANGE_ME" .env; then
+            if [ ! -f .env ] || grep -q "CHANGE_ME" .env || [ ! -f .env.ready ]; then
               echo "Creating/regenerating .env from template..."
               cp .env.example .env
               WEBHOOK_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
@@ -52,6 +52,7 @@ jobs:
               echo "Generated .env with real secrets"
               echo "Clearing stale database (encryption key changed)..."
               docker compose down -v 2>/dev/null || true
+              touch .env.ready
             fi
 
             echo "=== Validating .env ==="
