@@ -24,6 +24,7 @@ jobs:
           script: |
             set -e
             APP_DIR="/home/ubuntu/ai-gateway-poc"
+            PUBLIC_HOST="13.223.77.71"
 
             # Clone if not a git repo, otherwise pull
             if [ ! -d "$APP_DIR/.git" ]; then
@@ -37,6 +38,32 @@ jobs:
             echo "=== Pulling latest code ==="
             git fetch origin main
             git reset --hard origin/main
+
+            echo "=== Ensuring .env exists ==="
+            if [ ! -f .env ]; then
+              cp .env.example .env
+              python3 - <<'PY'
+              from base64 import urlsafe_b64encode
+              from pathlib import Path
+              import os
+              import secrets
+
+              env_path = Path('.env')
+              content = env_path.read_text()
+
+              replacements = {
+                  'WEBHOOK_SECRET=CHANGE_ME_webhook_secret_min16chars': f'WEBHOOK_SECRET={secrets.token_urlsafe(24)}',
+                  'ENCRYPTION_KEY=CHANGE_ME_generate_new_fernet_key_44chars': f'ENCRYPTION_KEY={urlsafe_b64encode(os.urandom(32)).decode()}',
+                  'CORS_ORIGINS=http://localhost:3000': 'CORS_ORIGINS=http://13.223.77.71:3000',
+                  'NEXT_PUBLIC_API_URL=http://127.0.0.1:8000': 'NEXT_PUBLIC_API_URL=http://13.223.77.71:8000',
+              }
+
+              for old, new in replacements.items():
+                  content = content.replace(old, new)
+
+              env_path.write_text(content)
+              PY
+            fi
 
             echo "=== Building and deploying ==="
             docker compose build
