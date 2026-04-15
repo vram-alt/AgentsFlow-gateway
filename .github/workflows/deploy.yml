@@ -50,6 +50,8 @@ jobs:
               sed -i "s|CORS_ORIGINS=http://localhost:3000|CORS_ORIGINS=http://${PUBLIC_HOST}:3000|" .env
               sed -i "s|NEXT_PUBLIC_API_URL=http://127.0.0.1:8000|NEXT_PUBLIC_API_URL=http://${PUBLIC_HOST}:8000|" .env
               echo "Generated .env with real secrets"
+              echo "Clearing stale database (encryption key changed)..."
+              docker compose down -v 2>/dev/null || true
             fi
 
             echo "=== Validating .env ==="
