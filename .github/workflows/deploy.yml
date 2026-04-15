@@ -40,7 +40,8 @@ jobs:
             git reset --hard origin/main
 
             echo "=== Ensuring .env exists ==="
-            if [ ! -f .env ]; then
+            if [ ! -f .env ] || grep -q "CHANGE_ME" .env; then
+              echo "Creating/regenerating .env from template..."
               cp .env.example .env
               WEBHOOK_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(24))")
               ENCRYPTION_KEY=$(python3 -c "from base64 import urlsafe_b64encode; import os; print(urlsafe_b64encode(os.urandom(32)).decode())")
@@ -48,7 +49,7 @@ jobs:
               sed -i "s|ENCRYPTION_KEY=CHANGE_ME_generate_new_fernet_key_44chars|ENCRYPTION_KEY=${ENCRYPTION_KEY}|" .env
               sed -i "s|CORS_ORIGINS=http://localhost:3000|CORS_ORIGINS=http://${PUBLIC_HOST}:3000|" .env
               sed -i "s|NEXT_PUBLIC_API_URL=http://127.0.0.1:8000|NEXT_PUBLIC_API_URL=http://${PUBLIC_HOST}:8000|" .env
-              echo "Generated .env from template"
+              echo "Generated .env with real secrets"
             fi
 
             echo "=== Building and deploying ==="
