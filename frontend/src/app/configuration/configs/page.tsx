@@ -68,10 +68,13 @@ type StrategyMode = "" | "fallback" | "loadbalance";
 interface ConfigBuilderState {
     // Targets
     selectedIntegration: string;
-    // Guardrails
-    beforeRequestGuardrails: string[];
-    afterRequestGuardrails: string[];
-    guardrailDenyMode: Record<string, boolean>; // guardrailId -> deny (true) or flag (false)
+    // Guardrails (Portkey recommended: simple ID arrays)
+    inputGuardrails: string[];
+    outputGuardrails: string[];
+    // Override params (model & hyperparameters)
+    overrideModel: string;
+    overrideTemperature: string;
+    overrideMaxTokens: string;
     // Retry
     retryEnabled: boolean;
     retryAttempts: number;
@@ -89,9 +92,11 @@ interface ConfigBuilderState {
 
 const defaultBuilderState: ConfigBuilderState = {
     selectedIntegration: "",
-    beforeRequestGuardrails: [],
-    afterRequestGuardrails: [],
-    guardrailDenyMode: {},
+    inputGuardrails: [],
+    outputGuardrails: [],
+    overrideModel: "",
+    overrideTemperature: "",
+    overrideMaxTokens: "",
     retryEnabled: false,
     retryAttempts: 3,
     retryStatusCodes: "",
@@ -105,27 +110,40 @@ const defaultBuilderState: ConfigBuilderState = {
 function builderToConfigBody(state: ConfigBuilderState): Record<string, unknown> {
     const config: Record<string, unknown> = {};
 
-    // Targets
+    // Single provider: virtual_key at root. Multi-target: use targets array with strategy.
     if (state.selectedIntegration) {
-        config.targets = [{ virtual_key: state.selectedIntegration }];
+        if (state.strategyMode) {
+            config.targets = [{ virtual_key: state.selectedIntegration }];
+        } else {
+            config.virtual_key = state.selectedIntegration;
+        }
     }
 
-    // Before-request guardrails
-    if (state.beforeRequestGuardrails.length > 0) {
-        config.before_request_hooks = state.beforeRequestGuardrails.map((id) => ({
-            type: "guardrail",
-            id,
-            deny: state.guardrailDenyMode[id] !== false,
-        }));
+    // Override params (model & hyperparameters)
+    const overrideParams: Record<string, unknown> = {};
+    if (state.overrideModel.trim()) {
+        overrideParams.model = state.overrideModel.trim();
+    }
+    if (state.overrideTemperature.trim()) {
+        const temp = parseFloat(state.overrideTemperature.trim());
+        if (!isNaN(temp)) overrideParams.temperature = temp;
+    }
+    if (state.overrideMaxTokens.trim()) {
+        const mt = parseInt(state.overrideMaxTokens.trim(), 10);
+        if (!isNaN(mt) && mt > 0) overrideParams.max_tokens = mt;
+    }
+    if (Object.keys(overrideParams).length > 0) {
+        config.override_params = overrideParams;
     }
 
-    // After-request guardrails
-    if (state.afterRequestGuardrails.length > 0) {
-        config.after_request_hooks = state.afterRequestGuardrails.map((id) => ({
-            type: "guardrail",
-            id,
-            deny: state.guardrailDenyMode[id] !== false,
-        }));
+    // Input guardrails (recommended Portkey format: simple ID arrays)
+    if (state.inputGuardrails.length > 0) {
+        config.input_guardrails = [...state.inputGuardrails];
+    }
+
+    // Output guardrails
+    if (state.outputGuardrails.length > 0) {
+        config.output_guardrails = [...state.outputGuardrails];
     }
 
     // Retry
@@ -177,35 +195,46 @@ function builderToConfigBody(state: ConfigBuilderState): Record<string, unknown>
 function configBodyToBuilder(body: Record<string, unknown>): ConfigBuilderState {
     const state = { ...defaultBuilderState };
 
-    // Targets
-    const targets = body.targets as Array<Record<string, unknown>> | undefined;
-    if (Array.isArray(targets) && targets.length > 0 && typeof targets[0].virtual_key === "string") {
-        state.selectedIntegration = targets[0].virtual_key;
-    }
-
-    // Before-request hooks
-    const beforeHooks = body.before_request_hooks as Array<Record<string, unknown>> | undefined;
-    if (Array.isArray(beforeHooks)) {
-        state.beforeRequestGuardrails = beforeHooks
-            .filter((h) => h.type === "guardrail" && h.id)
-            .map((h) => String(h.id));
-        for (const h of beforeHooks) {
-            if (h.type === "guardrail" && h.id) {
-                state.guardrailDenyMode[String(h.id)] = h.deny !== false;
-            }
+    // Targets — handle both top-level virtual_key and targets array
+    if (typeof body.virtual_key === "string") {
+        state.selectedIntegration = body.virtual_key;
+    } else {
+        const targets = body.targets as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(targets) && targets.length > 0 && typeof targets[0].virtual_key === "string") {
+            state.selectedIntegration = targets[0].virtual_key;
         }
     }
 
-    // After-request hooks
-    const afterHooks = body.after_request_hooks as Array<Record<string, unknown>> | undefined;
-    if (Array.isArray(afterHooks)) {
-        state.afterRequestGuardrails = afterHooks
-            .filter((h) => h.type === "guardrail" && h.id)
-            .map((h) => String(h.id));
-        for (const h of afterHooks) {
-            if (h.type === "guardrail" && h.id) {
-                state.guardrailDenyMode[String(h.id)] = h.deny !== false;
-            }
+    // Override params
+    const op = body.override_params as Record<string, unknown> | undefined;
+    if (op && typeof op === "object") {
+        if (typeof op.model === "string") state.overrideModel = op.model;
+        if (typeof op.temperature === "number") state.overrideTemperature = String(op.temperature);
+        if (typeof op.max_tokens === "number") state.overrideMaxTokens = String(op.max_tokens);
+    }
+
+    // Guardrails — handle both new (input_guardrails) and legacy (before_request_hooks) formats
+    const inputGr = body.input_guardrails as string[] | undefined;
+    if (Array.isArray(inputGr)) {
+        state.inputGuardrails = inputGr.filter((id) => typeof id === "string");
+    } else {
+        const beforeHooks = body.before_request_hooks as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(beforeHooks)) {
+            state.inputGuardrails = beforeHooks
+                .filter((h) => h.id)
+                .map((h) => String(h.id));
+        }
+    }
+
+    const outputGr = body.output_guardrails as string[] | undefined;
+    if (Array.isArray(outputGr)) {
+        state.outputGuardrails = outputGr.filter((id) => typeof id === "string");
+    } else {
+        const afterHooks = body.after_request_hooks as Array<Record<string, unknown>> | undefined;
+        if (Array.isArray(afterHooks)) {
+            state.outputGuardrails = afterHooks
+                .filter((h) => h.id)
+                .map((h) => String(h.id));
         }
     }
 
@@ -241,7 +270,8 @@ function configBodyToBuilder(body: Record<string, unknown>): ConfigBuilderState 
 
     // Collect remaining fields as custom metadata
     const knownKeys = new Set([
-        "targets", "before_request_hooks", "after_request_hooks",
+        "targets", "virtual_key", "before_request_hooks", "after_request_hooks",
+        "input_guardrails", "output_guardrails", "override_params",
         "retry", "cache", "strategy", "request_timeout",
     ]);
     const extra: Record<string, unknown> = {};
@@ -487,25 +517,15 @@ function ConfigsTab() {
         setBuilder((prev) => ({ ...prev, ...partial }));
     };
 
-    const toggleGuardrail = (id: string, hook: "before" | "after") => {
+    const toggleGuardrail = (id: string, hook: "input" | "output") => {
         setBuilder((prev) => {
-            const key = hook === "before" ? "beforeRequestGuardrails" : "afterRequestGuardrails";
+            const key = hook === "input" ? "inputGuardrails" : "outputGuardrails";
             const current = prev[key];
             const updated = current.includes(id)
                 ? current.filter((g) => g !== id)
                 : [...current, id];
             return { ...prev, [key]: updated };
         });
-    };
-
-    const toggleDenyMode = (id: string) => {
-        setBuilder((prev) => ({
-            ...prev,
-            guardrailDenyMode: {
-                ...prev.guardrailDenyMode,
-                [id]: !(prev.guardrailDenyMode[id] !== false),
-            },
-        }));
     };
 
     // Handle view
@@ -552,8 +572,6 @@ function ConfigsTab() {
             setActionLoading(null);
         }
     };
-
-    const allSelectedGuardrails = [...builder.beforeRequestGuardrails, ...builder.afterRequestGuardrails];
 
     return (
         <>
@@ -780,70 +798,80 @@ function ConfigsTab() {
                                     )}
                                 </Section>
 
-                                {/* Before-Request Guardrails */}
+                                {/* Model & Hyperparameters */}
                                 <Section
-                                    title="Before-Request Guardrails"
+                                    title="Model & Hyperparameters"
+                                    icon={Zap}
+                                    badge={builder.overrideModel ? builder.overrideModel : undefined}
+                                    defaultOpen={!!builder.overrideModel || !!builder.overrideTemperature || !!builder.overrideMaxTokens}
+                                >
+                                    <p className="text-xs text-muted-foreground">
+                                        Override the model and set custom parameters (override_params)
+                                    </p>
+                                    <div className="space-y-3">
+                                        <div className="space-y-1">
+                                            <label className="text-xs text-muted-foreground">Model Name</label>
+                                            <Input
+                                                value={builder.overrideModel}
+                                                onChange={(e) => updateBuilder({ overrideModel: e.target.value })}
+                                                placeholder="e.g., gpt-4o, claude-sonnet-4-20250514"
+                                                className="h-8 text-xs"
+                                            />
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-3">
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-muted-foreground">Temperature</label>
+                                                <Input
+                                                    value={builder.overrideTemperature}
+                                                    onChange={(e) => updateBuilder({ overrideTemperature: e.target.value })}
+                                                    placeholder="e.g., 0.7"
+                                                    className="h-8 text-xs"
+                                                />
+                                            </div>
+                                            <div className="space-y-1">
+                                                <label className="text-xs text-muted-foreground">Max Tokens</label>
+                                                <Input
+                                                    value={builder.overrideMaxTokens}
+                                                    onChange={(e) => updateBuilder({ overrideMaxTokens: e.target.value })}
+                                                    placeholder="e.g., 1024"
+                                                    className="h-8 text-xs"
+                                                />
+                                            </div>
+                                        </div>
+                                    </div>
+                                </Section>
+
+                                {/* Input Guardrails */}
+                                <Section
+                                    title="Input Guardrails"
                                     icon={Shield}
-                                    badge={builder.beforeRequestGuardrails.length > 0 ? `${builder.beforeRequestGuardrails.length} active` : undefined}
-                                    defaultOpen={builder.beforeRequestGuardrails.length > 0}
+                                    badge={builder.inputGuardrails.length > 0 ? `${builder.inputGuardrails.length} active` : undefined}
+                                    defaultOpen={builder.inputGuardrails.length > 0}
                                 >
                                     <p className="text-xs text-muted-foreground">
                                         Guardrails to evaluate <strong>before</strong> sending the request to the LLM
                                     </p>
                                     {guardrails.length > 0 ? (
-                                        <div className="space-y-2">
-                                            <div className="flex flex-wrap gap-2">
-                                                {guardrails.map((gr) => {
-                                                    const selected = builder.beforeRequestGuardrails.includes(gr.remote_id);
-                                                    return (
-                                                        <button
-                                                            key={gr.remote_id}
-                                                            type="button"
-                                                            onClick={() => toggleGuardrail(gr.remote_id, "before")}
-                                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                                                                selected
-                                                                    ? "bg-primary/10 border-primary/40 text-primary shadow-sm"
-                                                                    : "bg-secondary/30 border-border/60 text-muted-foreground hover:border-primary/20 hover:bg-secondary/50"
-                                                            }`}
-                                                        >
-                                                            <Shield className="w-3 h-3" />
-                                                            {gr.name || gr.remote_id}
-                                                            {selected && <Check className="w-3 h-3" />}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            {/* Deny mode toggles for selected guardrails */}
-                                            {builder.beforeRequestGuardrails.length > 0 && (
-                                                <div className="pt-2 space-y-1.5">
-                                                    <p className="text-xs text-muted-foreground font-medium">Action on violation:</p>
-                                                    {builder.beforeRequestGuardrails.map((gId) => {
-                                                        const gr = guardrails.find((g) => g.remote_id === gId);
-                                                        const isDeny = builder.guardrailDenyMode[gId] !== false;
-                                                        return (
-                                                            <div key={gId} className="flex items-center justify-between text-xs bg-secondary/30 rounded-md px-3 py-1.5">
-                                                                <span className="font-medium">{gr?.name || gId}</span>
-                                                                <div className="flex rounded-md border border-border/60 overflow-hidden">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => { if (!isDeny) toggleDenyMode(gId); else updateBuilder({ guardrailDenyMode: { ...builder.guardrailDenyMode, [gId]: true } }); }}
-                                                                        className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${isDeny ? "bg-destructive/15 text-destructive" : "hover:bg-secondary/60"}`}
-                                                                    >
-                                                                        Deny
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateBuilder({ guardrailDenyMode: { ...builder.guardrailDenyMode, [gId]: false } })}
-                                                                        className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${!isDeny ? "bg-amber-500/15 text-amber-600" : "hover:bg-secondary/60"}`}
-                                                                    >
-                                                                        Flag Only
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
+                                        <div className="flex flex-wrap gap-2">
+                                            {guardrails.map((gr) => {
+                                                const selected = builder.inputGuardrails.includes(gr.remote_id);
+                                                return (
+                                                    <button
+                                                        key={gr.remote_id}
+                                                        type="button"
+                                                        onClick={() => toggleGuardrail(gr.remote_id, "input")}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                                                            selected
+                                                                ? "bg-primary/10 border-primary/40 text-primary shadow-sm"
+                                                                : "bg-secondary/30 border-border/60 text-muted-foreground hover:border-primary/20 hover:bg-secondary/50"
+                                                        }`}
+                                                    >
+                                                        <Shield className="w-3 h-3" />
+                                                        {gr.name || gr.remote_id}
+                                                        {selected && <Check className="w-3 h-3" />}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <p className="text-xs text-muted-foreground italic">
@@ -852,69 +880,37 @@ function ConfigsTab() {
                                     )}
                                 </Section>
 
-                                {/* After-Request Guardrails */}
+                                {/* Output Guardrails */}
                                 <Section
-                                    title="After-Request Guardrails"
+                                    title="Output Guardrails"
                                     icon={Shield}
-                                    badge={builder.afterRequestGuardrails.length > 0 ? `${builder.afterRequestGuardrails.length} active` : undefined}
-                                    defaultOpen={builder.afterRequestGuardrails.length > 0}
+                                    badge={builder.outputGuardrails.length > 0 ? `${builder.outputGuardrails.length} active` : undefined}
+                                    defaultOpen={builder.outputGuardrails.length > 0}
                                 >
                                     <p className="text-xs text-muted-foreground">
                                         Guardrails to evaluate <strong>after</strong> receiving the LLM response
                                     </p>
                                     {guardrails.length > 0 ? (
-                                        <div className="space-y-2">
-                                            <div className="flex flex-wrap gap-2">
-                                                {guardrails.filter((gr) => !builder.beforeRequestGuardrails.includes(gr.remote_id)).map((gr) => {
-                                                    const selected = builder.afterRequestGuardrails.includes(gr.remote_id);
-                                                    return (
-                                                        <button
-                                                            key={gr.remote_id}
-                                                            type="button"
-                                                            onClick={() => toggleGuardrail(gr.remote_id, "after")}
-                                                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
-                                                                selected
-                                                                    ? "bg-primary/10 border-primary/40 text-primary shadow-sm"
-                                                                    : "bg-secondary/30 border-border/60 text-muted-foreground hover:border-primary/20 hover:bg-secondary/50"
-                                                            }`}
-                                                        >
-                                                            <Shield className="w-3 h-3" />
-                                                            {gr.name || gr.remote_id}
-                                                            {selected && <Check className="w-3 h-3" />}
-                                                        </button>
-                                                    );
-                                                })}
-                                            </div>
-                                            {builder.afterRequestGuardrails.length > 0 && (
-                                                <div className="pt-2 space-y-1.5">
-                                                    <p className="text-xs text-muted-foreground font-medium">Action on violation:</p>
-                                                    {builder.afterRequestGuardrails.map((gId) => {
-                                                        const gr = guardrails.find((g) => g.remote_id === gId);
-                                                        const isDeny = builder.guardrailDenyMode[gId] !== false;
-                                                        return (
-                                                            <div key={gId} className="flex items-center justify-between text-xs bg-secondary/30 rounded-md px-3 py-1.5">
-                                                                <span className="font-medium">{gr?.name || gId}</span>
-                                                                <div className="flex rounded-md border border-border/60 overflow-hidden">
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateBuilder({ guardrailDenyMode: { ...builder.guardrailDenyMode, [gId]: true } })}
-                                                                        className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${isDeny ? "bg-destructive/15 text-destructive" : "hover:bg-secondary/60"}`}
-                                                                    >
-                                                                        Deny
-                                                                    </button>
-                                                                    <button
-                                                                        type="button"
-                                                                        onClick={() => updateBuilder({ guardrailDenyMode: { ...builder.guardrailDenyMode, [gId]: false } })}
-                                                                        className={`px-2 py-0.5 text-[10px] font-medium transition-colors ${!isDeny ? "bg-amber-500/15 text-amber-600" : "hover:bg-secondary/60"}`}
-                                                                    >
-                                                                        Flag Only
-                                                                    </button>
-                                                                </div>
-                                                            </div>
-                                                        );
-                                                    })}
-                                                </div>
-                                            )}
+                                        <div className="flex flex-wrap gap-2">
+                                            {guardrails.map((gr) => {
+                                                const selected = builder.outputGuardrails.includes(gr.remote_id);
+                                                return (
+                                                    <button
+                                                        key={gr.remote_id}
+                                                        type="button"
+                                                        onClick={() => toggleGuardrail(gr.remote_id, "output")}
+                                                        className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all cursor-pointer ${
+                                                            selected
+                                                                ? "bg-primary/10 border-primary/40 text-primary shadow-sm"
+                                                                : "bg-secondary/30 border-border/60 text-muted-foreground hover:border-primary/20 hover:bg-secondary/50"
+                                                        }`}
+                                                    >
+                                                        <Shield className="w-3 h-3" />
+                                                        {gr.name || gr.remote_id}
+                                                        {selected && <Check className="w-3 h-3" />}
+                                                    </button>
+                                                );
+                                            })}
                                         </div>
                                     ) : (
                                         <p className="text-xs text-muted-foreground italic">
@@ -1095,14 +1091,14 @@ function ConfigsTab() {
                                 />
                             </div>
                         )}
-
-                        {formError && (
-                            <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-start gap-2">
-                                <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-                                <span>{formError}</span>
-                            </div>
-                        )}
                     </div>
+
+                    {formError && (
+                        <div className="p-2.5 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-xs flex items-start gap-2">
+                            <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+                            <span>{formError}</span>
+                        </div>
+                    )}
 
                     <DialogFooter className="pt-3">
                         <Button variant="outline" onClick={() => setDialogOpen(false)} disabled={saving}>
