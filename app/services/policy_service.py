@@ -103,6 +103,40 @@ def _validate_custom_guardrail_body(body: dict[str, Any]) -> str | None:
             if error:
                 return error
 
+        if check_id in {"external.validation", "external.validate"}:
+            method = str(parameters.get("method") or "POST").strip().upper()
+            if method not in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+                return f"checks[{index}].parameters.method must be a valid HTTP method"
+            error = _validate_http_url(
+                parameters.get("url"),
+                f"checks[{index}].parameters.url",
+            )
+            if error:
+                return error
+            error = _validate_headers_object(
+                parameters.get("headers"),
+                f"checks[{index}].parameters.headers",
+            )
+            if error:
+                return error
+            verdict_path = parameters.get("verdictPath")
+            if not isinstance(verdict_path, str) or not verdict_path.strip():
+                return f"checks[{index}].parameters.verdictPath must be a non-empty string"
+            event_type = str(parameters.get("eventType") or "beforeRequestHook").strip()
+            if event_type not in {"beforeRequestHook", "afterResponseHook", "both"}:
+                return (
+                    f"checks[{index}].parameters.eventType must be one of "
+                    "beforeRequestHook, afterResponseHook, both"
+                )
+            body_template = parameters.get("bodyTemplate")
+            if body_template is not None:
+                try:
+                    import json as _json
+
+                    _json.dumps(body_template)
+                except (TypeError, ValueError):
+                    return f"checks[{index}].parameters.bodyTemplate must be JSON-serializable"
+
         if check_id == "log" or check_id.endswith(".log"):
             error = _validate_http_url(
                 parameters.get("logURL"),
@@ -132,6 +166,21 @@ def _validate_custom_guardrail_body(body: dict[str, Any]) -> str | None:
             return error
 
     return None
+
+
+def _is_local_only_policy_body(body: dict[str, Any]) -> bool:
+    """Return True when the policy should be enforced only in the gateway."""
+    checks = body.get("checks")
+    if not isinstance(checks, list):
+        return False
+
+    for check in checks:
+        if not isinstance(check, dict):
+            continue
+        check_id = str(check.get("id", "")).strip().lower()
+        if check_id in {"external.validation", "external.validate"}:
+            return True
+    return False
 
 
 def _validate_range_params(
@@ -258,6 +307,14 @@ class PolicyService:
         if validation_error:
             return _make_error("VALIDATION_ERROR", validation_error)
 
+        if _is_local_only_policy_body(body):
+            return await self.policy_repo.create(
+                name=name,
+                body=body,
+                remote_id=None,
+                provider_id=provider.id,
+            )
+
         # 3. Build the cloud config — ensure 'name' is included for Portkey API
         cloud_config = dict(body)
         if "name" not in cloud_config:
@@ -323,8 +380,10 @@ class PolicyService:
             if validation_error:
                 return _make_error("VALIDATION_ERROR", validation_error)
 
+        is_local_only = body is not None and _is_local_only_policy_body(body)
+
         # 3. If body changed and remote_id exists — sync with cloud
-        if body is not None and policy.remote_id:
+        if body is not None and policy.remote_id and not is_local_only:
             provider = await self.provider_repo.get_active_by_name("portkey")
             # [RED-2] Guard against None provider
             if provider is None:
@@ -344,6 +403,8 @@ class PolicyService:
             changed["name"] = name
         if body is not None:
             changed["body"] = body
+        if is_local_only:
+            changed["remote_id"] = None
 
         updated = await self.policy_repo.update(policy_id, **changed)
 

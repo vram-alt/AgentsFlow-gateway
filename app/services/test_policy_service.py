@@ -246,6 +246,41 @@ class TestCreatePolicy:
         assert call_args[0]["name"] == "deterministic-policy"
         mock_policy_repo.create.assert_awaited_once()
 
+    @pytest.mark.asyncio
+    async def test_create_policy_external_validation_stays_local_only(
+        self, service, mock_provider_repo, mock_adapter, mock_policy_repo, fake_provider
+    ):
+        """External validation policies must be persisted locally and never sent to Portkey."""
+        mock_provider_repo.get_active_by_name.return_value = fake_provider
+        mock_policy_repo.create.return_value = MagicMock(id=77, name="external-policy", remote_id=None)
+
+        result = await service.create_policy(
+            name="external-policy",
+            body={
+                "checks": [
+                    {
+                        "id": "external.validation",
+                        "parameters": {
+                            "method": "POST",
+                            "url": "https://example.com/policy/execute",
+                            "eventType": "beforeRequestHook",
+                            "verdictPath": "result.verdict",
+                            "bodyTemplate": {
+                                "request": {"text": "{{request.latest_text}}"},
+                                "metadata": {"agent_id": "{{metadata.agent_id}}"},
+                            },
+                        },
+                    }
+                ],
+                "deny": True,
+            },
+        )
+
+        assert not isinstance(result, GatewayError)
+        mock_adapter.create_guardrail.assert_not_awaited()
+        mock_policy_repo.create.assert_awaited_once()
+        assert mock_policy_repo.create.await_args.kwargs["remote_id"] is None
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 4. update_policy
@@ -305,6 +340,36 @@ class TestUpdatePolicy:
         assert isinstance(result, GatewayError)
         assert result.error_code == "VALIDATION_ERROR"
         mock_adapter.update_guardrail.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_update_policy_external_validation_clears_remote_id_and_skips_cloud(
+        self, service, mock_policy_repo, mock_adapter, fake_policy
+    ):
+        """Converting a policy to external validation should keep it local-only."""
+        fake_policy.remote_id = "cloud-guardrail-id"
+        mock_policy_repo.get_by_id.return_value = fake_policy
+        mock_policy_repo.update.return_value = fake_policy
+
+        result = await service.update_policy(
+            policy_id=42,
+            body={
+                "checks": [
+                    {
+                        "id": "external.validation",
+                        "parameters": {
+                            "method": "POST",
+                            "url": "https://example.com/policy/execute",
+                            "eventType": "beforeRequestHook",
+                            "verdictPath": "result.verdict",
+                        },
+                    }
+                ]
+            },
+        )
+
+        assert result is fake_policy
+        mock_adapter.update_guardrail.assert_not_awaited()
+        assert mock_policy_repo.update.await_args.kwargs["remote_id"] is None
 
 
     @pytest.mark.asyncio

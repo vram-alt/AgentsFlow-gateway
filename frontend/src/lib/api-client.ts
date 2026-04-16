@@ -146,6 +146,7 @@ export interface ChatRequest {
     temperature?: number | null;
     max_tokens?: number | null;
     guardrail_ids?: string[];
+    metadata?: Record<string, unknown>;
 }
 
 export interface UsageInfo {

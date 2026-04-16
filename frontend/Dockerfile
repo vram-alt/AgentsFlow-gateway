@@ -24,6 +24,20 @@ ENV NEXT_PUBLIC_API_TOKEN=$NEXT_PUBLIC_API_TOKEN
 
 RUN npm run build
 
+# ── Stage 2.5: Development runtime with hot reload ───────────────────────
+FROM node:20-alpine AS dev
+WORKDIR /app
+
+COPY package.json package-lock.json* ./
+RUN npm ci
+
+ENV NODE_ENV=development
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME="0.0.0.0"
+ENV PORT=3000
+
+CMD ["npm", "run", "dev:docker"]
+
 # ── Stage 3: Production ──────────────────────────────────────────────
 FROM node:20-alpine AS runner
 WORKDIR /app

@@ -6,6 +6,7 @@ Specification: app/services/chat_service_spec.md
 
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import re
@@ -50,6 +51,7 @@ class ChatService:
         temperature: float | None = None,
         max_tokens: int | None = None,
         guardrail_ids: list[str] | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> UnifiedResponse | GatewayError:
         """Full cycle: evaluate local guardrails → provider → log → return."""
 
@@ -79,6 +81,7 @@ class ChatService:
             temperature=temperature,
             max_tokens=max_tokens,
             guardrail_ids=effective_guardrail_ids,
+            metadata=metadata or {},
         )
 
         local_guardrail_state: dict[str, Any] | None = None
@@ -88,6 +91,8 @@ class ChatService:
                 model=model,
                 messages=messages,
                 policies=local_policies,
+                metadata=metadata,
+                stage="beforeRequestHook",
             )
             blocked_response = local_guardrail_state.get("blocked_response") if local_guardrail_state else None
             if isinstance(blocked_response, UnifiedResponse):
@@ -133,7 +138,37 @@ class ChatService:
                 message=f"Adapter error: {exc}",
             )
 
-        local_details = local_guardrail_state.get("details") if local_guardrail_state else None
+        post_guardrail_state: dict[str, Any] | None = None
+        if isinstance(result, UnifiedResponse) and local_policies:
+            post_guardrail_state = await self._evaluate_local_policies(
+                trace_id=trace_id,
+                model=model,
+                messages=messages,
+                policies=local_policies,
+                metadata=metadata,
+                stage="afterResponseHook",
+                provider_response=result,
+            )
+            blocked_response = post_guardrail_state.get("blocked_response") if post_guardrail_state else None
+            if isinstance(blocked_response, UnifiedResponse):
+                combined_local_details = self._merge_local_guardrail_states(
+                    local_guardrail_state.get("details") if local_guardrail_state else None,
+                    post_guardrail_state.get("details"),
+                )
+                blocked_response = blocked_response.model_copy(
+                    update={"guardrail_details": combined_local_details}
+                )
+                await self._safe_log(
+                    trace_id=trace_id,
+                    prompt=prompt,
+                    response=blocked_response,
+                )
+                return blocked_response
+
+        local_details = self._merge_local_guardrail_states(
+            local_guardrail_state.get("details") if local_guardrail_state else None,
+            post_guardrail_state.get("details") if post_guardrail_state else None,
+        )
         if isinstance(result, UnifiedResponse) and local_details:
             result = result.model_copy(
                 update={
@@ -263,34 +298,31 @@ class ChatService:
         model: str,
         messages: list[dict[str, str]],
         policies: Sequence[Any],
+        metadata: dict[str, Any] | None = None,
+        stage: str = "beforeRequestHook",
+        provider_response: UnifiedResponse | None = None,
     ) -> dict[str, Any] | None:
         """Apply local-only policies in the gateway before contacting the provider."""
         if not policies:
             return None
 
-        request_payload = {
-            "trace_id": trace_id,
-            "metadata": {
-                "trace_id": trace_id,
-                "source": "local-guardrail-evaluator",
-            },
-            "request": {
-                "text": self._extract_text_from_messages(messages),
-                "json": {
-                    "model": model,
-                    "messages": messages,
-                },
-            },
-            "response": {},
-        }
+        request_payload = self._build_local_request_payload(
+            trace_id=trace_id,
+            model=model,
+            messages=messages,
+            metadata=metadata,
+            stage=stage,
+            provider_response=provider_response,
+        )
 
         hooks: list[dict[str, Any]] = []
         passed_checks: list[dict[str, Any]] = []
         failed_checks: list[dict[str, Any]] = []
         blocked_policy_names: list[str] = []
+        blocked_content: str | None = None
 
         for policy in policies:
-            hook = await self._evaluate_single_local_policy(policy, request_payload)
+            hook = await self._evaluate_single_local_policy(policy, request_payload, stage=stage)
             hooks.append(hook)
 
             for check in hook.get("checks", []):
@@ -306,6 +338,8 @@ class ChatService:
 
             if not hook.get("verdict", True) and hook.get("deny", False):
                 blocked_policy_names.append(str(getattr(policy, "name", hook.get("id", "unknown"))))
+                if blocked_content is None and isinstance(hook.get("blocked_content"), str):
+                    blocked_content = hook.get("blocked_content")
 
         summary = (
             f"Blocked by local policy: {', '.join(blocked_policy_names)}"
@@ -323,7 +357,7 @@ class ChatService:
         if blocked_policy_names:
             blocked_response = UnifiedResponse(
                 trace_id=trace_id,
-                content=summary,
+                content=blocked_content or summary,
                 model=model,
                 provider_raw={
                     "source": "local-guardrail-evaluator",
@@ -342,6 +376,8 @@ class ChatService:
         self,
         policy: Any,
         request_payload: dict[str, Any],
+        *,
+        stage: str = "beforeRequestHook",
     ) -> dict[str, Any]:
         """Evaluate one local policy body and return a Portkey-like hook result."""
         body = self._coerce_policy_body(getattr(policy, "body", {}))
@@ -361,7 +397,9 @@ class ChatService:
                         }
                     )
                     continue
-                check_results.append(await self._evaluate_local_check(check, request_payload))
+                check_results.append(
+                    await self._evaluate_local_check(check, request_payload, stage=stage)
+                )
 
         if not check_results:
             check_results.append(
@@ -378,17 +416,35 @@ class ChatService:
             "verdict": verdict,
             "deny": deny,
             "checks": check_results,
+            "blocked_content": next(
+                (
+                    str(check.get("blocked_content"))
+                    for check in check_results
+                    if isinstance(check.get("blocked_content"), str)
+                    and str(check.get("blocked_content")).strip()
+                ),
+                None,
+            ),
         }
 
     async def _evaluate_local_check(
         self,
         check: dict[str, Any],
         request_payload: dict[str, Any],
+        stage: str = "beforeRequestHook",
     ) -> dict[str, Any]:
         """Evaluate a single local check (regex, webhook, or log)."""
         check_id = str(check.get("id", "unknown")).strip() or "unknown"
         normalized_id = check_id.lower()
         parameters = check.get("parameters") if isinstance(check.get("parameters"), dict) else {}
+
+        if normalized_id in {"external.validation", "external.validate"}:
+            return await self._evaluate_external_validation_check(
+                check_id,
+                parameters,
+                request_payload,
+                stage=stage,
+            )
 
         if "regexmatch" in normalized_id:
             return self._evaluate_regex_check(check_id, parameters, request_payload)
@@ -1108,6 +1164,257 @@ class ChatService:
             "id": check_id,
             "verdict": True,
             "explanation": "Log hook executed successfully.",
+        }
+
+    @staticmethod
+    def _extract_latest_text_from_messages(messages: list[dict[str, str]]) -> str:
+        """Return the latest non-empty chat message text."""
+        for message in reversed(messages):
+            content = str(message.get("content", "")).strip()
+            if content:
+                return content
+        return ""
+
+    def _build_local_request_payload(
+        self,
+        *,
+        trace_id: str,
+        model: str,
+        messages: list[dict[str, str]],
+        metadata: dict[str, Any] | None,
+        stage: str,
+        provider_response: UnifiedResponse | None,
+    ) -> dict[str, Any]:
+        """Build the context payload shared with local guardrail checks."""
+        request_text = self._extract_text_from_messages(messages)
+        latest_text = self._extract_latest_text_from_messages(messages)
+        merged_metadata = {
+            "trace_id": trace_id,
+            "source": "local-guardrail-evaluator",
+            **(metadata or {}),
+        }
+        response_payload: dict[str, Any] = {}
+        if provider_response is not None:
+            response_payload = {
+                "text": provider_response.content,
+                "model": provider_response.model,
+                "json": provider_response.provider_raw,
+            }
+
+        return {
+            "trace_id": trace_id,
+            "eventType": stage,
+            "metadata": merged_metadata,
+            "request": {
+                "text": request_text,
+                "latest_text": latest_text,
+                "json": {
+                    "model": model,
+                    "messages": messages,
+                },
+            },
+            "response": response_payload,
+        }
+
+    @staticmethod
+    def _extract_path_value(payload: Any, path: str) -> Any:
+        """Resolve a dotted path with numeric array indexes from a JSON-like object."""
+        if not path:
+            return payload
+
+        current = payload
+        for raw_part in path.split("."):
+            part = raw_part.strip()
+            if not part:
+                return None
+            if isinstance(current, list):
+                try:
+                    current = current[int(part)]
+                except (TypeError, ValueError, IndexError):
+                    return None
+                continue
+            if not isinstance(current, dict):
+                return None
+            current = current.get(part)
+            if current is None:
+                return None
+        return current
+
+    @classmethod
+    def _render_template_string(cls, template: str, context: dict[str, Any]) -> Any:
+        """Replace {{path}} tokens inside a string using request/response metadata."""
+        exact_match = re.fullmatch(r"\s*\{\{\s*([^{}]+?)\s*\}\}\s*", template)
+        if exact_match:
+            return cls._extract_path_value(context, exact_match.group(1).strip())
+
+        def _replace(match: re.Match[str]) -> str:
+            value = cls._extract_path_value(context, match.group(1).strip())
+            if value is None:
+                return ""
+            if isinstance(value, (dict, list)):
+                return json.dumps(value)
+            return str(value)
+
+        return re.sub(r"\{\{\s*([^{}]+?)\s*\}\}", _replace, template)
+
+    @classmethod
+    def _render_template_value(cls, template: Any, context: dict[str, Any]) -> Any:
+        """Recursively render a template object using {{path}} placeholders."""
+        if isinstance(template, str):
+            return cls._render_template_string(template, context)
+        if isinstance(template, list):
+            return [cls._render_template_value(item, context) for item in template]
+        if isinstance(template, dict):
+            return {
+                str(key): cls._render_template_value(value, context)
+                for key, value in template.items()
+            }
+        return copy.deepcopy(template)
+
+    @staticmethod
+    def _coerce_verdict(value: Any, *, default: bool = False) -> bool:
+        """Normalize a provider-specific verdict payload into a boolean result."""
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, (int, float)):
+            return bool(value)
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"true", "allow", "allowed", "pass", "passed", "ok"}:
+                return True
+            if normalized in {"false", "block", "blocked", "deny", "denied", "fail", "failed"}:
+                return False
+        return default
+
+    async def _evaluate_external_validation_check(
+        self,
+        check_id: str,
+        parameters: dict[str, Any],
+        request_payload: dict[str, Any],
+        *,
+        stage: str,
+    ) -> dict[str, Any]:
+        """Call a configurable external validation endpoint and use its verdict."""
+        event_type = str(parameters.get("eventType") or "beforeRequestHook").strip() or "beforeRequestHook"
+        if event_type != "both" and event_type != stage:
+            return {
+                "id": check_id,
+                "verdict": True,
+                "explanation": f"Skipped for {stage}.",
+            }
+
+        method = str(parameters.get("method") or "POST").strip().upper() or "POST"
+        url_template = str(parameters.get("url") or "").strip()
+        if not url_template:
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": "External validation is missing the target URL.",
+            }
+
+        timeout_ms = parameters.get("timeoutMs") or parameters.get("timeout") or 5000
+        timeout_seconds = max(float(timeout_ms) / 1000.0, 1.0)
+        url = str(self._render_template_string(url_template, request_payload) or "").strip()
+        headers_template = parameters.get("headers") if isinstance(parameters.get("headers"), dict) else {}
+        headers_rendered = self._render_template_value(headers_template, request_payload)
+        headers = {
+            str(key): str(value)
+            for key, value in headers_rendered.items()
+        } if isinstance(headers_rendered, dict) else {}
+        body_template = parameters.get("bodyTemplate", request_payload)
+        rendered_body = self._render_template_value(body_template, request_payload)
+
+        request_kwargs: dict[str, Any] = {"headers": headers}
+        if method in {"GET", "HEAD"}:
+            if isinstance(rendered_body, dict):
+                request_kwargs["params"] = {
+                    str(key): "" if value is None else str(value)
+                    for key, value in rendered_body.items()
+                }
+        else:
+            request_kwargs["json"] = rendered_body
+
+        try:
+            async with httpx.AsyncClient(timeout=timeout_seconds) as client:
+                response = await client.request(method, url, **request_kwargs)
+        except Exception as exc:
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": f"External validation failed: {exc}",
+            }
+
+        try:
+            payload = response.json()
+        except ValueError:
+            payload = {"raw": response.text}
+
+        verdict_path = str(parameters.get("verdictPath") or "result.verdict").strip()
+        verdict_value = self._extract_path_value(payload, verdict_path)
+        verdict = self._coerce_verdict(
+            verdict_value,
+            default=bool(parameters.get("passIfMissingVerdict", False)),
+        )
+
+        message_path = str(parameters.get("messagePath") or "").strip()
+        explanation_value = self._extract_path_value(payload, message_path) if message_path else None
+        explanation = str(explanation_value).strip() if explanation_value not in (None, "") else "External validation passed." if verdict else "External validation blocked the request."
+        transformed_message_path = str(parameters.get("transformedMessagePath") or "").strip()
+        blocked_content = self._extract_path_value(payload, transformed_message_path) if transformed_message_path else None
+        policies_path = str(parameters.get("policiesPath") or "").strip()
+        policies_value = self._extract_path_value(payload, policies_path) if policies_path else None
+
+        if response.status_code >= 400:
+            detail = explanation if explanation else response.text
+            return {
+                "id": check_id,
+                "verdict": False,
+                "explanation": f"External validation failed: HTTP {response.status_code} — {detail}",
+                "blocked_content": str(blocked_content).strip() if isinstance(blocked_content, str) and blocked_content.strip() else None,
+            }
+
+        policy_suffix = ""
+        if isinstance(policies_value, list) and policies_value:
+            policy_suffix = f" Policies: {', '.join(str(item) for item in policies_value)}"
+
+        return {
+            "id": check_id,
+            "verdict": verdict,
+            "explanation": f"{explanation}{policy_suffix}".strip(),
+            "blocked_content": str(blocked_content).strip() if isinstance(blocked_content, str) and blocked_content.strip() else None,
+            "external_response": payload,
+        }
+
+    @staticmethod
+    def _merge_local_guardrail_states(
+        first: dict[str, Any] | None,
+        second: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Merge two local guardrail detail payloads from before/after stages."""
+        if not first:
+            return second
+        if not second:
+            return first
+
+        hooks = [*list(first.get("hooks", [])), *list(second.get("hooks", []))]
+        failed_checks = [
+            *list(first.get("failed_checks", [])),
+            *list(second.get("failed_checks", [])),
+        ]
+        passed_checks = [
+            *list(first.get("passed_checks", [])),
+            *list(second.get("passed_checks", [])),
+        ]
+        summaries = [
+            str(summary).strip()
+            for summary in (first.get("summary"), second.get("summary"))
+            if isinstance(summary, str) and summary.strip()
+        ]
+        return {
+            "summary": " | ".join(dict.fromkeys(summaries)) if summaries else "Local guardrails evaluated",
+            "hooks": hooks,
+            "failed_checks": failed_checks,
+            "passed_checks": passed_checks,
         }
 
     @staticmethod

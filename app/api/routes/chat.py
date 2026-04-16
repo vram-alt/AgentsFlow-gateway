@@ -35,6 +35,7 @@ async def send_chat(
         temperature=body.temperature,
         max_tokens=body.max_tokens,
         guardrail_ids=body.guardrail_ids,
+        metadata=body.metadata,
     )
 
     if isinstance(result, GatewayError):

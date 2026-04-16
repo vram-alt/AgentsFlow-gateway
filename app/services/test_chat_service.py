@@ -538,6 +538,18 @@ class TestSendChatMessageHappyPath:
 
         assert trace_id_1 != trace_id_2
 
+    @pytest.mark.asyncio
+    async def test_prompt_contains_metadata_when_provided(self, service, mock_adapter):
+        """Chat metadata should be carried into the unified prompt."""
+        await service.send_chat_message(
+            model=SAMPLE_MODEL,
+            messages=SAMPLE_MESSAGES,
+            metadata={"agent_id": "HR Onboarding Assistant Agent"},
+        )
+
+        prompt_arg = mock_adapter.send_prompt.call_args[0][0]
+        assert prompt_arg.metadata["agent_id"] == "HR Onboarding Assistant Agent"
+
 
 # ═══════════════════════════════════════════════════════════════════════════
 # 3. Провайдер не найден / деактивирован (specification §4, AUTH_FAILED)
@@ -1080,6 +1092,143 @@ class TestPolicyBlockingE2E:
 
         assert isinstance(result, UnifiedResponse)
         assert result.guardrail_blocked is not True
+        mock_adapter.send_prompt.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_external_validation_blocks_before_provider_call_with_transformed_message(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """A failing external validation check should block before the Portkey request."""
+        local_policy = MagicMock(
+            id=102,
+            name="External agent policy",
+            remote_id=None,
+            body={
+                "checks": [
+                    {
+                        "id": "external.validation",
+                        "parameters": {
+                            "method": "POST",
+                            "url": "https://example.com/policy/execute",
+                            "eventType": "beforeRequestHook",
+                            "verdictPath": "result.verdict",
+                            "messagePath": "result.metadata.decision",
+                            "transformedMessagePath": "result.transformedData.request.json.messages.0.content",
+                            "bodyTemplate": {
+                                "request": {"text": "{{request.latest_text}}"},
+                                "eventType": "{{eventType}}",
+                                "metadata": {"agent_id": "{{metadata.agent_id}}"},
+                            },
+                        },
+                    }
+                ],
+                "actions": {"onFail": "block"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "result": {
+                "verdict": False,
+                "metadata": {"decision": "block", "policies": ["Mask Emails Policy"]},
+                "transformedData": {
+                    "request": {
+                        "json": {
+                            "messages": [
+                                {"role": "user", "content": "Request blocked due to policy violation"}
+                            ]
+                        }
+                    }
+                },
+            }
+        }
+        mock_client = AsyncMock()
+        mock_client.request.return_value = response
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__.return_value = mock_client
+
+        with patch("app.services.chat_service.httpx.AsyncClient", return_value=mock_cm):
+            result = await service.send_chat_message(
+                model="gemini-2.5-flash",
+                messages=[{"role": "user", "content": "My email is alice@example.com"}],
+                metadata={"agent_id": "HR Onboarding Assistant Agent"},
+            )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is True
+        assert result.content == "Request blocked due to policy violation"
+        mock_adapter.send_prompt.assert_not_awaited()
+        request_kwargs = mock_client.request.await_args.kwargs
+        assert request_kwargs["json"]["request"]["text"] == "My email is alice@example.com"
+        assert request_kwargs["json"]["metadata"]["agent_id"] == "HR Onboarding Assistant Agent"
+
+    @pytest.mark.asyncio
+    async def test_external_validation_can_block_after_provider_response(
+        self, service, mock_policy_repo, mock_adapter
+    ):
+        """After-response external validation should be able to replace the LLM output."""
+        local_policy = MagicMock(
+            id=103,
+            name="External response policy",
+            remote_id=None,
+            body={
+                "checks": [
+                    {
+                        "id": "external.validation",
+                        "parameters": {
+                            "method": "POST",
+                            "url": "https://example.com/policy/execute",
+                            "eventType": "afterResponseHook",
+                            "verdictPath": "result.verdict",
+                            "transformedMessagePath": "result.transformedData.request.json.messages.0.content",
+                            "bodyTemplate": {
+                                "request": {"text": "{{request.latest_text}}"},
+                                "response": {"text": "{{response.text}}"},
+                                "metadata": {"agent_id": "{{metadata.agent_id}}"},
+                            },
+                        },
+                    }
+                ],
+                "actions": {"onFail": "block"},
+                "deny": True,
+            },
+            is_active=True,
+        )
+        mock_policy_repo.list_all.return_value = [local_policy]
+
+        response = MagicMock(status_code=200)
+        response.json.return_value = {
+            "result": {
+                "verdict": False,
+                "transformedData": {
+                    "request": {
+                        "json": {
+                            "messages": [
+                                {"role": "user", "content": "Response blocked due to policy violation"}
+                            ]
+                        }
+                    }
+                },
+            }
+        }
+        mock_client = AsyncMock()
+        mock_client.request.return_value = response
+        mock_cm = AsyncMock()
+        mock_cm.__aenter__.return_value = mock_client
+
+        with patch("app.services.chat_service.httpx.AsyncClient", return_value=mock_cm):
+            result = await service.send_chat_message(
+                model="gemini-2.5-flash",
+                messages=[{"role": "user", "content": "Tell me something sensitive"}],
+                metadata={"agent_id": "Finance Assistant"},
+            )
+
+        assert isinstance(result, UnifiedResponse)
+        assert result.guardrail_blocked is True
+        assert result.content == "Response blocked due to policy violation"
         mock_adapter.send_prompt.assert_awaited_once()
 
 

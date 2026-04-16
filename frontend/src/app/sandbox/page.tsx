@@ -134,6 +134,8 @@ export default function SandboxPage() {
 function ChatTab() {
     const [messages, setMessages] = useState<ChatMessage[]>([]);
     const [input, setInput] = useState("");
+    const [agentId, setAgentId] = useState("");
+    const [agencyId, setAgencyId] = useState("");
     const [model, setModel] = useState("gemini-2.5-flash");
     const [provider, setProvider] = useState("portkey");
     const [temperature, setTemperature] = useState("0.7");
@@ -228,6 +230,13 @@ function ChatTab() {
                 temperature: parseFloat(temperature) || null,
                 max_tokens: parseInt(maxTokens) || null,
                 guardrail_ids: selectedGuardrails.length > 0 ? selectedGuardrails : undefined,
+                metadata:
+                    agentId.trim() || agencyId.trim()
+                        ? {
+                            ...(agentId.trim() ? { agent_id: agentId.trim() } : {}),
+                            ...(agencyId.trim() ? { agency_id: agencyId.trim() } : {}),
+                        }
+                        : undefined,
             });
 
             // Build blocked message with guardrail details from backend
@@ -439,6 +448,28 @@ function ChatTab() {
                             />
 
                         </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Agent ID</label>
+                            <Input
+                                value={agentId}
+                                onChange={(e) => setAgentId(e.target.value)}
+                                placeholder="e.g. HR Onboarding Assistant Agent"
+                            />
+                            <p className="text-[10px] text-muted-foreground/70 leading-tight">
+                                Passed as <strong>metadata.agent_id</strong> so local external validation policies can include the active sandbox agent in their request body.
+                            </p>
+                        </div>
+                        <div className="space-y-2">
+                            <label className="text-sm text-muted-foreground">Agency ID</label>
+                            <Input
+                                value={agencyId}
+                                onChange={(e) => setAgencyId(e.target.value)}
+                                placeholder="e.g. APAC-HR-01"
+                            />
+                            <p className="text-[10px] text-muted-foreground/70 leading-tight">
+                                Passed as <strong>metadata.agency_id</strong> so external validation policies can include the selected agency in their request body.
+                            </p>
+                        </div>
 
                         {/* Guardrail Policies */}
                         {policies.length > 0 && (() => {
@@ -499,7 +530,7 @@ function ChatTab() {
                                     <p className="text-[10px] text-muted-foreground/70 leading-tight">
                                         {guardrailMode === "cloud"
                                             ? "Cloud guardrails are enforced by Portkey before the LLM call. If none are selected, all active cloud policies apply automatically."
-                                            : "Local policies are enforced by the gateway before the LLM call. If none are selected, all active local policies apply automatically."}
+                                            : "Local policies are enforced by the gateway before the LLM call, and external validators can also run after the model response. If none are selected, all active local policies apply automatically."}
                                     </p>
 
                                     <Select

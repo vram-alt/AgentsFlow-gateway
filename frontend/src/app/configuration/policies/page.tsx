@@ -62,6 +62,7 @@ const POLICY_PRESET_PATTERNS = {
 } as const;
 
 type PolicyTemplateKind = "manual" | "regex-pii" | "regex-sql" | "regex-custom" | "webhook-validate" | "log-only" | "validate-and-log"
+    | "external-validation"
     | "sentence-count" | "word-count" | "character-count"
     | "uppercase-check" | "lowercase-check" | "ends-with"
     | "json-schema" | "json-keys" | "valid-urls"
@@ -70,6 +71,7 @@ type PolicyTemplateKind = "manual" | "regex-pii" | "regex-sql" | "regex-custom" 
     | "required-metadata-keys" | "required-metadata-kv";
 type PolicyTemplateMode = "contains" | "regex";
 type PolicyTemplateTarget = "request" | "response" | "both";
+type ExternalPolicyEventType = "beforeRequestHook" | "afterResponseHook" | "both";
 
 type PolicyTemplateConfig = {
     mode: PolicyTemplateMode;
@@ -81,6 +83,15 @@ type PolicyTemplateConfig = {
     deny: boolean;
     async: boolean;
     invertMatch: boolean;
+    externalMethod: string;
+    externalUrl: string;
+    externalEventType: ExternalPolicyEventType;
+    externalHeaders: string;
+    externalBodyTemplate: string;
+    externalVerdictPath: string;
+    externalMessagePath: string;
+    externalTransformedMessagePath: string;
+    externalPoliciesPath: string;
 };
 
 const DEFAULT_TEMPLATE_CONFIG: PolicyTemplateConfig = {
@@ -93,12 +104,31 @@ const DEFAULT_TEMPLATE_CONFIG: PolicyTemplateConfig = {
     deny: true,
     async: false,
     invertMatch: false,
+    externalMethod: "POST",
+    externalUrl: "https://ven07172.service-now.com/api/x_juro_appsflow/agent_policy_api/execute",
+    externalEventType: "beforeRequestHook",
+    externalHeaders: JSON.stringify({ "Content-Type": "application/json" }, null, 2),
+    externalBodyTemplate: JSON.stringify({
+        request: {
+            text: "{{request.latest_text}}",
+        },
+        eventType: "{{eventType}}",
+        metadata: {
+            agent_id: "{{metadata.agent_id}}",
+            agency_id: "{{metadata.agency_id}}",
+        },
+    }, null, 2),
+    externalVerdictPath: "result.verdict",
+    externalMessagePath: "result.metadata.decision",
+    externalTransformedMessagePath: "result.transformedData.request.json.messages.0.content",
+    externalPoliciesPath: "result.metadata.policies",
 };
 
 const TEMPLATE_DEFAULT_NAMES: Record<Exclude<PolicyTemplateKind, "manual">, string> = {
     "regex-pii": "Block PII Leaks",
     "regex-sql": "Block SQL Injection",
     "regex-custom": "Custom Regex Policy",
+    "external-validation": "External Validation Policy",
     "webhook-validate": "Custom Webhook Validation",
     "log-only": "Custom Output Logging",
     "validate-and-log": "Validate and Log",
@@ -133,7 +163,7 @@ const TEMPLATE_CATEGORY_OPTIONS: Array<{
         key: "popular",
         label: "Popular",
         description: "Fast starters for the most common policies",
-        kinds: ["regex-pii", "regex-sql", "regex-custom", "webhook-validate", "validate-and-log", "log-only"],
+        kinds: ["regex-pii", "regex-sql", "regex-custom", "external-validation", "webhook-validate", "validate-and-log", "log-only"],
     },
     {
         key: "content",
@@ -155,12 +185,60 @@ const TEMPLATE_CATEGORY_OPTIONS: Array<{
     },
 ];
 
+function parseJsonInput<T>(value: string, fallback: T): T {
+    try {
+        return JSON.parse(value) as T;
+    } catch {
+        return fallback;
+    }
+}
+
 function buildPolicyTemplate(
     kind: Exclude<PolicyTemplateKind, "manual">,
     config: PolicyTemplateConfig,
 ): string {
     const secretPlaceholder = "REPLACE_WITH_YOUR_WEBHOOK_SECRET";
     const baseUrl = DEFAULT_WEBHOOK_BASE_URL.replace(/\/$/, "");
+
+    if (kind === "external-validation") {
+        const renderedHeaders = parseJsonInput<Record<string, string>>(config.externalHeaders, {
+            "Content-Type": "application/json",
+        });
+        const renderedBodyTemplate = parseJsonInput<Record<string, unknown>>(config.externalBodyTemplate, {
+            request: { text: "{{request.latest_text}}" },
+            eventType: "{{eventType}}",
+            metadata: { agent_id: "{{metadata.agent_id}}" },
+        });
+
+        return JSON.stringify(
+            {
+                checks: [
+                    {
+                        id: "external.validation",
+                        parameters: {
+                            method: config.externalMethod || "POST",
+                            url: config.externalUrl,
+                            eventType: config.externalEventType,
+                            headers: renderedHeaders,
+                            timeoutMs: Number.parseInt(config.timeoutMs, 10) || 5000,
+                            bodyTemplate: renderedBodyTemplate,
+                            verdictPath: config.externalVerdictPath || "result.verdict",
+                            messagePath: config.externalMessagePath || "result.metadata.decision",
+                            transformedMessagePath: config.externalTransformedMessagePath || "result.transformedData.request.json.messages.0.content",
+                            policiesPath: config.externalPoliciesPath || "result.metadata.policies",
+                        },
+                    },
+                ],
+                actions: {
+                    onFail: config.deny ? "block" : "allow",
+                    onPass: "allow",
+                },
+                deny: config.deny,
+            },
+            null,
+            2,
+        );
+    }
 
     if (kind === "regex-pii" || kind === "regex-sql" || kind === "regex-custom") {
         const regexRule = kind === "regex-pii"
@@ -434,6 +512,26 @@ function validateCustomPolicyBody(body: Record<string, unknown>): string | null 
             return `Check #${index + 1} must include a valid 'logURL'.`;
         }
 
+        if ((checkId === "external.validation" || checkId === "external.validate") && !isValidHttpUrl(parameters.url)) {
+            return `Check #${index + 1} must include a valid 'url'.`;
+        }
+
+        if (checkId === "external.validation" || checkId === "external.validate") {
+            if (typeof parameters.method !== "string" || parameters.method.trim().length === 0) {
+                return `Check #${index + 1} must include an HTTP 'method'.`;
+            }
+            if (typeof parameters.verdictPath !== "string" || parameters.verdictPath.trim().length === 0) {
+                return `Check #${index + 1} must include a 'verdictPath'.`;
+            }
+            if (parameters.bodyTemplate !== undefined) {
+                try {
+                    JSON.stringify(parameters.bodyTemplate);
+                } catch {
+                    return `Check #${index + 1} bodyTemplate must be valid JSON.`;
+                }
+            }
+        }
+
         if (parameters.headers !== undefined && (typeof parameters.headers !== "object" || Array.isArray(parameters.headers))) {
             return `Check #${index + 1} headers must be a JSON object.`;
         }
@@ -533,6 +631,22 @@ export default function PoliciesPage() {
                 ? { ...templateConfig, pattern: POLICY_PRESET_PATTERNS.sql, invertMatch: false, deny: true, async: false, target: "request" }
                 : kind === "regex-custom"
                     ? { ...templateConfig, pattern: POLICY_PRESET_PATTERNS.custom, invertMatch: false, deny: true, async: false, target: "request" }
+                    : kind === "external-validation"
+                        ? {
+                            ...templateConfig,
+                            externalMethod: "POST",
+                            externalUrl: DEFAULT_TEMPLATE_CONFIG.externalUrl,
+                            externalEventType: "beforeRequestHook",
+                            externalHeaders: DEFAULT_TEMPLATE_CONFIG.externalHeaders,
+                            externalBodyTemplate: DEFAULT_TEMPLATE_CONFIG.externalBodyTemplate,
+                            externalVerdictPath: DEFAULT_TEMPLATE_CONFIG.externalVerdictPath,
+                            externalMessagePath: DEFAULT_TEMPLATE_CONFIG.externalMessagePath,
+                            externalTransformedMessagePath: DEFAULT_TEMPLATE_CONFIG.externalTransformedMessagePath,
+                            externalPoliciesPath: DEFAULT_TEMPLATE_CONFIG.externalPoliciesPath,
+                            timeoutMs: "5000",
+                            deny: true,
+                            async: false,
+                        }
                     : kind === "log-only"
                         ? { ...templateConfig, target: "response", deny: false, async: true }
                         : kind === "contains"
@@ -899,14 +1013,14 @@ export default function PoliciesPage() {
                                 : TEMPLATE_DEFAULT_NAMES[templateKind]}
                         </p>
                     </DialogHeader>
-                    <div className="flex-1 min-h-0 overflow-hidden py-3">
+                    <div className="flex h-full flex-1 min-h-0 flex-col overflow-hidden py-3">
                         {error && (
                             <div className="p-3 rounded-lg bg-destructive/10 border border-destructive/20 text-destructive text-sm flex items-center gap-2">
                                 <AlertTriangle className="w-4 h-4" />
                                 {error}
                             </div>
                         )}
-                        <div className={`grid gap-3 ${editingPolicy ? "md:grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_220px]"}`}>
+                        <div className={`grid shrink-0 gap-3 ${editingPolicy ? "md:grid-cols-1" : "md:grid-cols-[minmax(0,1fr)_220px]"}`}>
                             <div className="space-y-2">
                                 <label className="text-sm font-medium">Name</label>
                                 <Input
@@ -931,15 +1045,16 @@ export default function PoliciesPage() {
                                 </div>
                             )}
                         </div>
-                        <div className="space-y-2">
+                        <div className="mt-3 flex h-full min-h-0 flex-1 flex-col space-y-2 overflow-hidden">
                             <div className="flex items-center justify-between gap-2">
                                 <label className="text-sm font-medium">Policy Body (JSON)</label>
                                 <Badge variant="outline" className="text-[11px]">
                                     {templateKind === "manual" ? "Manual JSON" : TEMPLATE_DEFAULT_NAMES[templateKind]}
                                 </Badge>
                             </div>
-                            <div className="grid min-h-0 gap-4 xl:grid-cols-[280px_minmax(0,1fr)]">
-                                <div className="space-y-3 rounded-xl border border-border/60 bg-secondary/20 p-3 xl:max-h-[58vh] xl:overflow-hidden">
+                            <div className="grid h-full min-h-0 flex-1 gap-4 overflow-hidden xl:grid-cols-[280px_minmax(0,1fr)]">
+                                <div className="min-h-0 overflow-y-auto rounded-xl border border-border/60 bg-secondary/20 p-3">
+                                    <div className="space-y-3">
                                     <div className="space-y-1">
                                         <p className="text-sm font-medium">Starter templates</p>
                                         <p className="text-[11px] text-muted-foreground">
@@ -984,8 +1099,10 @@ export default function PoliciesPage() {
                                             ))}
                                         </div>
                                     </div>
+                                    </div>
                                 </div>
-                                <div className="min-w-0 space-y-3 xl:min-h-0">
+                                <div className="min-h-0 min-w-0 overflow-y-auto pr-1">
+                                    <div className="space-y-3">
                                     {templateKind !== "manual" && (
                                         <div className="space-y-3 rounded-lg border border-border/60 bg-secondary/30 p-3">
                                             {(templateKind === "regex-pii" || templateKind === "regex-sql" || templateKind === "regex-custom") ? (
@@ -1011,6 +1128,113 @@ export default function PoliciesPage() {
                                                     </div>
                                                     <p className="text-[11px] text-muted-foreground">
                                                         Good for quick policies like <strong>Block PII Leaks</strong> and <strong>Block SQL Injection</strong>. The builder keeps the same JSON structure as your existing saved policies.
+                                                    </p>
+                                                </div>
+                                            ) : templateKind === "external-validation" ? (
+                                                <div className="space-y-3">
+                                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                        <div className="space-y-1 sm:col-span-2">
+                                                            <label className="text-xs font-medium">External endpoint URL</label>
+                                                            <Input
+                                                                value={templateConfig.externalUrl}
+                                                                onChange={(e) => patchTemplateConfig({ externalUrl: e.target.value })}
+                                                                placeholder="https://ven07172.service-now.com/api/x_juro_appsflow/agent_policy_api/execute"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">HTTP method</label>
+                                                            <Select
+                                                                value={templateConfig.externalMethod}
+                                                                onChange={(e) => patchTemplateConfig({ externalMethod: e.target.value })}
+                                                            >
+                                                                <option value="POST">POST</option>
+                                                                <option value="PUT">PUT</option>
+                                                                <option value="PATCH">PATCH</option>
+                                                                <option value="GET">GET</option>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Run when</label>
+                                                            <Select
+                                                                value={templateConfig.externalEventType}
+                                                                onChange={(e) => patchTemplateConfig({ externalEventType: e.target.value as ExternalPolicyEventType })}
+                                                            >
+                                                                <option value="beforeRequestHook">Before request</option>
+                                                                <option value="afterResponseHook">After response</option>
+                                                                <option value="both">Before + after</option>
+                                                            </Select>
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Verdict path</label>
+                                                            <Input
+                                                                value={templateConfig.externalVerdictPath}
+                                                                onChange={(e) => patchTemplateConfig({ externalVerdictPath: e.target.value })}
+                                                                placeholder="result.verdict"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Message path</label>
+                                                            <Input
+                                                                value={templateConfig.externalMessagePath}
+                                                                onChange={(e) => patchTemplateConfig({ externalMessagePath: e.target.value })}
+                                                                placeholder="result.metadata.decision"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Transformed message path</label>
+                                                            <Input
+                                                                value={templateConfig.externalTransformedMessagePath}
+                                                                onChange={(e) => patchTemplateConfig({ externalTransformedMessagePath: e.target.value })}
+                                                                placeholder="result.transformedData.request.json.messages.0.content"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Policies path</label>
+                                                            <Input
+                                                                value={templateConfig.externalPoliciesPath}
+                                                                onChange={(e) => patchTemplateConfig({ externalPoliciesPath: e.target.value })}
+                                                                placeholder="result.metadata.policies"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1 sm:col-span-2">
+                                                            <label className="text-xs font-medium">Headers JSON</label>
+                                                            <Textarea
+                                                                value={templateConfig.externalHeaders}
+                                                                onChange={(e) => patchTemplateConfig({ externalHeaders: e.target.value })}
+                                                                className="min-h-28 font-mono text-xs"
+                                                            />
+                                                        </div>
+                                                        <div className="space-y-1 sm:col-span-2">
+                                                            <label className="text-xs font-medium">Body template JSON</label>
+                                                            <Textarea
+                                                                value={templateConfig.externalBodyTemplate}
+                                                                onChange={(e) => patchTemplateConfig({ externalBodyTemplate: e.target.value })}
+                                                                className="min-h-40 font-mono text-xs"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                                        <div className="space-y-1">
+                                                            <label className="text-xs font-medium">Timeout (ms)</label>
+                                                            <Input
+                                                                value={templateConfig.timeoutMs}
+                                                                onChange={(e) => patchTemplateConfig({ timeoutMs: e.target.value })}
+                                                                placeholder="5000"
+                                                            />
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex flex-wrap gap-4 text-xs text-muted-foreground">
+                                                        <label className="flex items-center gap-2">
+                                                            <input
+                                                                type="checkbox"
+                                                                checked={templateConfig.deny}
+                                                                onChange={(e) => patchTemplateConfig({ deny: e.target.checked })}
+                                                            />
+                                                            Block on failed verdict
+                                                        </label>
+                                                    </div>
+                                                    <p className="text-[11px] text-muted-foreground leading-relaxed">
+                                                        This builder creates a <strong>local-only</strong> policy. Use placeholders like <code className="bg-secondary px-1 rounded">{"{{request.latest_text}}"}</code>, <code className="bg-secondary px-1 rounded">{"{{metadata.agent_id}}"}</code>, <code className="bg-secondary px-1 rounded">{"{{metadata.agency_id}}"}</code>, <code className="bg-secondary px-1 rounded">{"{{eventType}}"}</code>, and <code className="bg-secondary px-1 rounded">{"{{response.text}}"}</code> inside the body template.
                                                     </p>
                                                 </div>
                                             ) : (templateKind === "sentence-count" || templateKind === "word-count" || templateKind === "character-count"
@@ -1142,12 +1366,13 @@ export default function PoliciesPage() {
                                     <Textarea
                                         value={formData.body}
                                         onChange={(e) => setFormData({ ...formData, body: e.target.value })}
-                                        className="h-[48vh] min-h-96 resize-none rounded-xl border-border/70 bg-background/80 font-mono text-xs leading-5 shadow-inner"
+                                        className="h-[40vh] min-h-72 resize-none rounded-xl border-border/70 bg-background/80 font-mono text-xs leading-5 shadow-inner"
                                         placeholder='{"checks": [...], "actions": [{"type": "block", "message": "Blocked"}]}'
                                     />
                                     <p className="text-[11px] text-muted-foreground">
                                         The JSON stays fully editable — template selections only prefill the structure for you.
                                     </p>
+                                    </div>
                                 </div>
                             </div>
                         </div>
